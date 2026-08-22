@@ -21,7 +21,7 @@ import { DEVICE_BY_ID, PRESET_BY_ID } from './lib/radio.js';
 import { analyzeSite, heightSweep, analyzeDirect, profileFromGrid, clutterProfiles, getHopProfiles, pinProfiles } from './lib/analysis.js';
 import { fetchClutter, estimateClutter, gridBbox, clutterSummary } from './lib/clutter.js';
 import { loadRoads, nearestRoad, bboxAround, clearRoadCache } from './lib/osm.js';
-import { exportGpx, exportKml, exportPdf, preloadPdf } from './lib/exporters.js';
+import { exportGpx, exportKml, exportPdf, exportXlsx, preloadPdf } from './lib/exporters.js';
 import { renderCoverageMapPNG } from './lib/mapRender.js';
 import { useI18n } from './lib/i18n.js';
 import {
@@ -574,6 +574,12 @@ export default function App() {
     chain: scan?.chain,
     direct,
     lang,
+    // Uniquement consommes par le classeur de calcul : le balayage en hauteur,
+    // les statistiques du scan et l enveloppe de portee n apparaissent pas
+    // dans les autres exports.
+    sweep: activeSweep,
+    stats: scan?.stats,
+    cover,
   };
   exportDataRef.current = exportData;
 
@@ -610,6 +616,14 @@ export default function App() {
     } catch (e) {
       setExportError(t('app.error.exportPrep', { msg: e.message }));
     }
+
+    // La compression du classeur passe par CompressionStream, donc asynchrone
+    // comme le PDF - d ou la meme mecanique d ancre differee.
+    exportXlsx(exportDataRef.current)
+      .then((h) => keep('xlsx', h))
+      .catch((e) => {
+        if (!cancelled) setExportError(t('app.error.xlsxUnavailable', { msg: e.message }));
+      });
 
     const img = (k) => {
       try {
@@ -1172,6 +1186,7 @@ export default function App() {
                   ['gpx', t('app.export.gpx.label'), t('app.export.gpx.hint')],
                   ['kml', t('app.export.kml.label'), t('app.export.kml.hint')],
                   ['pdf', t('app.export.pdf.label'), t('app.export.pdf.hint')],
+                  ['xlsx', t('app.export.xlsx.label'), t('app.export.xlsx.hint')],
                 ].map(([kind, label, hint]) => {
                   const file = exportFiles?.[kind];
                   // Une vraie ancre, sur laquelle l utilisateur clique

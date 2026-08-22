@@ -501,7 +501,44 @@ séparément, au panneau « Chaîne de relais » et au panneau du site sélectio
   limite de réception et cercle d'horizon radio en référence.
 - **Comparateur de hauteurs** de 2 à 20 m, avec la hauteur minimale atteignant
   la marge souhaitée — la réponse à « faut-il investir dans un mât ? ».
-- **Exports** GPX, KML et rapport PDF (~140 Ko, verdict en première page).
+- **Exports** GPX, KML, rapport PDF (~140 Ko, verdict en première page) et
+  classeur de calcul `.xlsx`.
+
+### Classeur de calcul
+
+Le PDF résume ce qu'il faut retenir ; le classeur donne les **nombres bruts**,
+y compris ceux que l'interface n'affiche jamais. Dix feuilles, selon ce qui a
+été calculé :
+
+| Feuille | Contenu |
+|---|---|
+| Synthèse | Sites, paramètres radio, verdict, statistiques du balayage |
+| Bilan de liaison | Chaque terme du bilan, bond par bond (FSPL, diffraction, feuillage, v, RSSI, σ) |
+| Chaîne de relais | Un bond par ligne, avec coordonnées des deux extrémités, cap et marges |
+| Classement | Les **120** emplacements retenus, pas seulement les 5 affichés |
+| Classement par hauteur | Chaque site × chaque hauteur testée — ces bilans sont calculés pour tous, mais l'interface n'en montre que le meilleur |
+| Hauteurs d'antenne | Le balayage de 2 à 20 m |
+| Profils (×3) | Le relief **point par point** : distance, relief 4/3 + bâti, canopée, ligne de visée, enveloppe de Fresnel, dégagement en mètres et en % |
+| Portée par azimut | La distance atteinte dans chaque direction, pour les deux seuils |
+
+**Pourquoi `.xlsx` et pas CSV.** Un CSV ne transporte que du texte, et le
+séparateur décimal dépend de la locale du tableur qui l'ouvre : le même
+fichier s'ouvre correctement sous un Excel français et en colonne unique sous
+un Excel anglais, ou l'inverse. Un `.xlsx` stocke de vrais nombres — le
+problème disparaît, dans les deux langues de l'application.
+
+Le générateur est écrit à la main dans [`src/lib/xlsx.js`](src/lib/xlsx.js) :
+un `.xlsx` est une archive ZIP de documents XML, soit environ 200 lignes
+(CRC32, en-têtes ZIP, SpreadsheetML). La seule alternative aurait été
+SheetJS, 400 Ko pour écrire des tableaux de nombres, et dont le paquet npm
+n'est plus la distribution maintenue par ses auteurs. La compression passe par
+`CompressionStream('deflate-raw')`, avec repli sur une archive non compressée
+— plus volumineuse mais tout aussi valide — là où l'API manque.
+
+Vérifié en relisant le fichier produit : archive relue entrée par entrée avec
+CRC32 recalculés, chaque XML repassé au parseur DOM du navigateur, et les
+valeurs recoupées avec le tableau affiché à l'écran (coordonnées, marges,
+dégagement de Fresnel, portée moyenne par azimut).
 
 ### Fiabilité du téléchargement
 

@@ -6,8 +6,9 @@
 
 import { PRESET_BY_ID, REGION_BY_ID, erp, eirp, erpLimitFor, assessLink } from './radio.js';
 import { PROVIDER_BY_ID } from './elevation.js';
-import { toDMS, bearing, formatBearing } from './geo.js';
+import { toDMS, bearing, formatBearing, haversine } from './geo.js';
 import { tFor } from './strings.js';
+import { buildXlsx } from './xlsx.js';
 
 export function disclaimerShort(lang = 'fr') {
   return tFor(lang, 'export.disclaimerShort');
@@ -224,6 +225,390 @@ export function exportKml(data) {
     buildKml({ ...data, desiredMargin: data.radio?.desiredMargin }),
     'application/vnd.google-earth.kml+xml'
   );
+}
+
+// ---------------------------------------------------------------------------
+// Classeur de calcul (.xlsx)
+// ---------------------------------------------------------------------------
+
+/** Arrondi d affichage, `null` si la valeur n est pas un nombre exploitable. */
+const num = (v, d = 2) => (Number.isFinite(v) ? Math.round(v * 10 ** d) / 10 ** d : null);
+
+/**
+ * Classeur reprenant l integralite des calculs, feuille par feuille.
+ *
+ * Le rapport PDF resume ce qu il faut retenir ; ce classeur donne les nombres
+ * bruts, y compris ceux que l interface n affiche jamais : le profil
+ * d elevation point par point, les 120 emplacements du classement, et le
+ * detail de chaque hauteur d antenne testee sur chacun d eux.
+ */
+export async function exportXlsx(data) {
+  const { tx, rx, relay, radio, search, provider, result, top, chain, direct, cover, lang = 'fr' } = data;
+  const tt = (key, vars) => tFor(lang, key, vars);
+  const preset = PRESET_BY_ID[radio.preset];
+  const region = REGION_BY_ID[radio.region];
+  const yesNo = (b) => tt(b ? 'xlsx.row.yes' : 'xlsx.row.no');
+  const sheets = [];
+
+  // --- Synthese -----------------------------------------------------------
+  const summary = [[tt('xlsx.col.parameter'), tt('xlsx.col.value')]];
+  const row = (k, v) => summary.push([k, v]);
+
+  row(tt('xlsx.row.generatedAt'), new Date().toLocaleString(lang === 'fr' ? 'fr-FR' : 'en-US'));
+
+  row(tt('xlsx.row.section.sites'), '');
+  for (const [label, s] of [
+    [tt('export.pdf.tx'), tx],
+    [tt('export.pdf.rx'), rx],
+  ]) {
+    row(`${label} - ${tt('site.name')}`, s.name);
+    row(`${label} - ${tt('xlsx.col.lat')}`, num(s.lat, 6));
+    row(`${label} - ${tt('xlsx.col.lon')}`, num(s.lon, 6));
+    row(`${label} - ${tt('xlsx.col.elevM')}`, num(s.elev, 1));
+    row(`${label} - ${tt('xlsx.col.mastM')}`, num(s.height, 1));
+    row(`${label} - ${tt('site.antennaGain')} (dBi)`, num(s.gain, 1));
+  }
+  row(tt('search.linkDistance') + ' (km)', num(haversine(tx, rx) / 1000, 3));
+  row(tt('search.linkBearing') + ' (deg)', num(bearing(tx, rx), 1));
+
+  row(tt('xlsx.row.section.radio'), '');
+  row(tt('radio.region'), tt(`radio.region.${region.id}.label`));
+  row(tt('radio.freq') + ' (MHz)', num(radio.freq, 3));
+  row(tt('radio.preset'), preset.label);
+  row(tt('link.row.rssi') + ' - sensibilite (dBm)', num(preset.sens, 1));
+  row(tt('radio.txPower') + ' (dBm)', num(radio.power, 1));
+  row(tt('radio.relayPower') + ' (dBm)', num(radio.relayPower, 1));
+  row(tt('radio.relayGain') + ' (dBi)', num(radio.relayGain, 1));
+  row(tt('radio.cableLoss') + ' (dB)', num(radio.cableLoss, 1));
+  row(tt('radio.eirp') + ' (dBm)', num(eirp(radio.power, Math.max(tx.gain, rx.gain), radio.cableLoss), 2));
+  row(tt('radio.erp') + ' (dBm)', num(erp(radio.power, Math.max(tx.gain, rx.gain), radio.cableLoss), 2));
+  row(tt('export.pdf.regLimit') + ' (dBm ERP)', num(erpLimitFor(radio.region, radio.freq), 1));
+  row(tt('radio.desiredMargin') + ' (dB)', num(radio.desiredMargin, 1));
+
+  if (result) {
+    const v = assessLink({
+      margin: result.margin,
+      margin95: result.margin95,
+      clearance: result.clearance,
+      desiredMargin: radio.desiredMargin,
+      foliage: result.foliage,
+      sigma: Math.max(result.hop1?.sigma ?? 0, result.hop2?.sigma ?? 0),
+      lang,
+    });
+    row(tt('xlsx.row.section.result'), '');
+    row(tt('xlsx.row.verdict'), v.label);
+    row(tt('xlsx.row.verdictReason'), v.reason);
+    if (relay) {
+      row(`${tt('export.pdf.relayRetained')} - ${tt('xlsx.col.lat')}`, num(relay.lat, 6));
+      row(`${tt('export.pdf.relayRetained')} - ${tt('xlsx.col.lon')}`, num(relay.lon, 6));
+      row(`${tt('export.pdf.relayRetained')} - ${tt('xlsx.col.elevM')}`, num(relay.elev, 1));
+    }
+    row(tt('xlsx.row.relayHeight'), num(result.height, 1));
+    row(tt('xlsx.row.marginMedian'), num(result.margin, 2));
+    row(tt('xlsx.row.margin95'), num(result.margin95, 2));
+    row(tt('xlsx.row.sigma'), num(v.sigma, 2));
+    row(tt('xlsx.row.minClearance'), num(result.clearance * 100, 1));
+    row(tt('link.row.vegetation') + ' (dB)', num(result.foliage, 2));
+    if (direct) {
+      row(tt('xlsx.row.directMargin'), num(direct.margin, 2));
+      row(tt('xlsx.row.directDiffraction'), num(direct.diffraction, 2));
+      row(tt('xlsx.row.relayGainDb'), num(result.margin - direct.margin, 2));
+    }
+  }
+
+  if (chain?.nodes?.length) {
+    row(tt('xlsx.row.section.chain'), '');
+    row(tt('xlsx.row.chainRelays'), chain.relays);
+    row(tt('xlsx.row.chainMargin95'), num(chain.margin95, 2));
+    row(tt('xlsx.row.chainFeasible'), yesNo(chain.feasible));
+  }
+
+  row(tt('xlsx.row.section.scan'), '');
+  row(tt('export.pdf.dem'), PROVIDER_BY_ID[provider]?.label ?? provider);
+  row(tt('xlsx.row.searchRadius'), num(search.radius, 0));
+  row(tt('xlsx.row.gridStep'), num(search.step, 0));
+  row(tt('xlsx.row.heightsTested'), search.heights.join(', '));
+  row(tt('xlsx.row.clutter'), yesNo(search.clutter));
+  row(tt('xlsx.row.buildings'), yesNo(search.clutter && search.buildings));
+  if (data.stats) {
+    row(tt('xlsx.row.candidates'), data.stats.candidates);
+    row(tt('xlsx.row.evaluated'), data.stats.evaluated);
+    row(tt('xlsx.row.excludedSlope'), data.stats.excludedSlope);
+    row(tt('xlsx.row.excludedWater'), data.stats.excludedWater);
+    row(tt('xlsx.row.excludedNoData'), data.stats.excludedNoData);
+    row(tt('xlsx.row.computeMs'), data.stats.ms);
+  }
+  row(tt('xlsx.note.disclaimer'), disclaimerShort(lang));
+  sheets.push({ name: tt('xlsx.sheet.summary'), rows: summary });
+
+  // --- Bilan de liaison, terme par terme ----------------------------------
+  if (result) {
+    const { hop1, hop2 } = result;
+    const lb = [[tt('xlsx.col.quantity'), tt('link.hop1'), tt('link.hop2')]];
+    const pair = (label, a, b, d = 2) => lb.push([label, num(a, d), num(b, d)]);
+    pair(tt('xlsx.col.distKm'), hop1.distM / 1000, hop2.distM / 1000, 3);
+    pair(tt('link.row.fspl') + ' (dB)', hop1.fspl, hop2.fspl);
+    pair(tt('link.row.diffraction') + ' (dB)', hop1.diffraction, hop2.diffraction);
+    pair(tt('link.row.vegetation') + ' (dB)', hop1.foliage, hop2.foliage);
+    pair(tt('link.row.vegetation') + ' (m)', hop1.foliageDepth, hop2.foliageDepth, 1);
+    pair(tt('link.row.vParam'), hop1.v, hop2.v, 3);
+    pair(tt('link.row.rssi') + ' (dBm)', hop1.rssi, hop2.rssi);
+    pair(tt('link.row.fresnelClear') + ' (%)', hop1.clearance * 100, hop2.clearance * 100, 1);
+    pair(tt('xlsx.row.marginMedian'), hop1.margin, hop2.margin);
+    pair(tt('xlsx.row.margin95'), hop1.margin95, hop2.margin95);
+    pair(tt('xlsx.row.sigma'), hop1.sigma, hop2.sigma);
+    pair(tt('xlsx.col.scoreDb'), hop1.scored, hop2.scored);
+    pair(`${tt('xlsx.col.mastM')} - ${tt('xlsx.col.from')}`, hop1.zA, hop2.zA, 1);
+    pair(`${tt('xlsx.col.mastM')} - ${tt('xlsx.col.to')}`, hop1.zB, hop2.zB, 1);
+    sheets.push({ name: tt('xlsx.sheet.linkBudget'), rows: lb });
+  }
+
+  // --- Chaine de relais ----------------------------------------------------
+  if (chain?.hops?.length && chain.nodes?.length > 1) {
+    const labelOf = (i) => (i === 0 ? 'TX' : i === chain.nodes.length - 1 ? 'RX' : `R${i}`);
+    const rows = [
+      [
+        tt('xlsx.col.hop'),
+        tt('xlsx.col.from'),
+        tt('xlsx.col.latFrom'),
+        tt('xlsx.col.lonFrom'),
+        tt('xlsx.col.elevFrom'),
+        tt('xlsx.col.mastFrom'),
+        tt('xlsx.col.to'),
+        tt('xlsx.col.latTo'),
+        tt('xlsx.col.lonTo'),
+        tt('xlsx.col.elevTo'),
+        tt('xlsx.col.mastTo'),
+        tt('xlsx.col.bearingDeg'),
+        tt('xlsx.col.distKm'),
+        tt('xlsx.col.fresnelPct'),
+        tt('xlsx.col.foliageDb'),
+        tt('xlsx.col.diffractionDb'),
+        tt('xlsx.col.rssiDbm'),
+        tt('xlsx.col.marginDb'),
+        tt('xlsx.col.margin95Db'),
+      ],
+    ];
+    chain.hops.forEach((h, i) => {
+      const a = chain.nodes[i];
+      const b = chain.nodes[i + 1];
+      if (!a || !b) return;
+      rows.push([
+        `${labelOf(i)} -> ${labelOf(i + 1)}`,
+        labelOf(i),
+        num(a.lat, 6),
+        num(a.lon, 6),
+        num(a.elev, 1),
+        num(a.height, 1),
+        labelOf(i + 1),
+        num(b.lat, 6),
+        num(b.lon, 6),
+        num(b.elev, 1),
+        num(b.height, 1),
+        num(bearing(a, b), 1),
+        num(h ? h.distM / 1000 : null, 3),
+        num(h ? h.clearance * 100 : null, 1),
+        num(h?.foliage, 2),
+        num(h?.diffraction, 2),
+        num(h?.rssi, 2),
+        num(h?.margin, 2),
+        num(h?.margin95, 2),
+      ]);
+    });
+    sheets.push({ name: tt('xlsx.sheet.chain'), rows });
+  }
+
+  // --- Classement complet --------------------------------------------------
+  if (top?.length) {
+    const rows = [
+      [
+        tt('xlsx.col.rank'),
+        tt('xlsx.col.lat'),
+        tt('xlsx.col.lon'),
+        tt('xlsx.col.elevM'),
+        tt('xlsx.col.slopeDeg'),
+        tt('xlsx.col.dTxKm'),
+        tt('xlsx.col.dRxKm'),
+        tt('xlsx.col.mastM'),
+        tt('xlsx.col.m1'),
+        tt('xlsx.col.m2'),
+        tt('xlsx.col.marginDb'),
+        tt('xlsx.col.margin95Db'),
+        tt('xlsx.col.scoreDb'),
+        tt('xlsx.col.c1'),
+        tt('xlsx.col.c2'),
+        tt('xlsx.col.rssi1'),
+        tt('xlsx.col.rssi2'),
+        tt('xlsx.col.diff1'),
+        tt('xlsx.col.diff2'),
+        tt('xlsx.col.foliageDb'),
+      ],
+    ];
+    top.forEach((r, i) => {
+      const b = r.best;
+      rows.push([
+        i + 1,
+        num(r.lat, 6),
+        num(r.lon, 6),
+        num(r.elev, 1),
+        num(r.slope, 2),
+        num(r.d1 / 1000, 3),
+        num(r.d2 / 1000, 3),
+        num(b.h, 1),
+        num(b.m1, 2),
+        num(b.m2, 2),
+        num(b.margin, 2),
+        num(b.margin95, 2),
+        num(b.score, 2),
+        num(b.c1 * 100, 1),
+        num(b.c2 * 100, 1),
+        num(b.rssi1, 2),
+        num(b.rssi2, 2),
+        num(b.diff1, 2),
+        num(b.diff2, 2),
+        num(b.foliage, 2),
+      ]);
+    });
+    sheets.push({ name: tt('xlsx.sheet.ranking'), rows });
+
+    // Detail par hauteur : ces bilans sont bien calcules pour chaque site,
+    // mais l interface n en montre jamais que le meilleur.
+    const byH = [
+      [
+        tt('xlsx.col.rank'),
+        tt('xlsx.col.lat'),
+        tt('xlsx.col.lon'),
+        tt('xlsx.col.mastM'),
+        tt('xlsx.col.isBest'),
+        tt('xlsx.col.m1'),
+        tt('xlsx.col.m2'),
+        tt('xlsx.col.marginDb'),
+        tt('xlsx.col.margin95Db'),
+        tt('xlsx.col.scoreDb'),
+        tt('xlsx.col.c1'),
+        tt('xlsx.col.c2'),
+        tt('xlsx.col.rssi1'),
+        tt('xlsx.col.rssi2'),
+        tt('xlsx.col.diff1'),
+        tt('xlsx.col.diff2'),
+        tt('xlsx.col.foliageDb'),
+      ],
+    ];
+    top.forEach((r, i) => {
+      for (const h of r.byHeight ?? []) {
+        byH.push([
+          i + 1,
+          num(r.lat, 6),
+          num(r.lon, 6),
+          num(h.h, 1),
+          yesNo(h.h === r.best.h),
+          num(h.m1, 2),
+          num(h.m2, 2),
+          num(h.margin, 2),
+          num(h.margin95, 2),
+          num(h.score, 2),
+          num(h.c1 * 100, 1),
+          num(h.c2 * 100, 1),
+          num(h.rssi1, 2),
+          num(h.rssi2, 2),
+          num(h.diff1, 2),
+          num(h.diff2, 2),
+          num(h.foliage, 2),
+        ]);
+      }
+    });
+    if (byH.length > 1) sheets.push({ name: tt('xlsx.sheet.rankingByHeight'), rows: byH });
+  }
+
+  // --- Balayage en hauteur d antenne --------------------------------------
+  if (data.sweep?.length) {
+    const rows = [
+      [
+        tt('xlsx.col.mastM'),
+        tt('xlsx.col.m1'),
+        tt('xlsx.col.m2'),
+        tt('xlsx.col.marginDb'),
+        tt('xlsx.col.margin95Db'),
+        tt('xlsx.col.scoreDb'),
+        tt('xlsx.col.c1'),
+        tt('xlsx.col.c2'),
+      ],
+    ];
+    for (const s of data.sweep) {
+      rows.push([
+        num(s.height, 1),
+        num(s.m1, 2),
+        num(s.m2, 2),
+        num(s.margin, 2),
+        num(s.margin95, 2),
+        num(s.score, 2),
+        num(s.c1 * 100, 1),
+        num(s.c2 * 100, 1),
+      ]);
+    }
+    sheets.push({ name: tt('xlsx.sheet.heights'), rows });
+  }
+
+  // --- Profils d elevation, echantillon par echantillon --------------------
+  const profileSheet = (hop, name) => {
+    const s = hop?.series;
+    if (!s?.dist?.length) return;
+    const rows = [
+      [
+        tt('xlsx.col.index'),
+        tt('xlsx.col.distKm'),
+        tt('xlsx.col.terrainM'),
+        tt('xlsx.col.canopyM'),
+        tt('xlsx.col.losM'),
+        tt('xlsx.col.fresnelUpM'),
+        tt('xlsx.col.fresnelDownM'),
+        tt('xlsx.col.fresnelRadiusM'),
+        tt('xlsx.col.clearanceM'),
+        tt('xlsx.col.clearanceRatioPct'),
+      ],
+    ];
+    for (let i = 0; i < s.dist.length; i++) {
+      const r1 = s.fresnelUp[i] - s.los[i];
+      const clear = s.los[i] - s.terrain[i];
+      rows.push([
+        i,
+        num(s.dist[i], 4),
+        num(s.terrain[i], 2),
+        num(s.canopy?.[i], 2),
+        num(s.los[i], 2),
+        num(s.fresnelUp[i], 2),
+        num(s.fresnelDown[i], 2),
+        num(r1, 2),
+        num(clear, 2),
+        num(r1 > 0 ? (clear / r1) * 100 : null, 1),
+      ]);
+    }
+    sheets.push({ name, rows });
+  };
+  profileSheet(result?.hop1, tt('xlsx.sheet.profile1'));
+  profileSheet(result?.hop2, tt('xlsx.sheet.profile2'));
+  profileSheet(direct, tt('xlsx.sheet.profileDirect'));
+
+  // --- Portee par azimut ---------------------------------------------------
+  if (cover?.rings?.length && cover.rays?.azimuths?.length) {
+    const az = cover.rays.azimuths;
+    const strong = cover.rings.find((r) => r.threshold > 0);
+    const outer = cover.rings.find((r) => r.threshold === 0);
+    const rows = [
+      [tt('xlsx.col.azimuthDeg'), tt('xlsx.col.rangeReliableKm'), tt('xlsx.col.rangeLimitKm')],
+    ];
+    for (let a = 0; a < az.length; a++) {
+      rows.push([
+        num(az[a], 2),
+        num(strong ? strong.radii[a] / 1000 : null, 3),
+        num(outer ? outer.radii[a] / 1000 : null, 3),
+      ]);
+    }
+    sheets.push({ name: tt('xlsx.sheet.coverage'), rows });
+  }
+
+  const blob = await buildXlsx(sheets);
+  return makeFile(`lora-relay-calc-${stamp()}.xlsx`, blob, blob.type);
 }
 
 // ---------------------------------------------------------------------------
