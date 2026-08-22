@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import Chart from 'chart.js/auto';
+import { useI18n } from '../lib/i18n.js';
 
 const GRID = 'rgba(148, 163, 184, 0.12)';
 const TICK = '#8b93a5';
@@ -34,12 +35,13 @@ const criticalMarker = {
     ctx.font = '600 10px Inter, system-ui, sans-serif';
     ctx.textAlign = x > (scales.x.left + scales.x.right) / 2 ? 'right' : 'left';
     const dx = x > (scales.x.left + scales.x.right) / 2 ? -6 : 6;
-    ctx.fillText('obstacle dominant', x + dx, Math.min(yTop, yBot) - 8);
+    ctx.fillText(opts.label ?? 'obstacle dominant', x + dx, Math.min(yTop, yBot) - 8);
     ctx.restore();
   },
 };
 
 export default function ProfileChart({ hop, title, subtitle, onReady, height = 240 }) {
+  const { t } = useI18n();
   const canvasRef = useRef(null);
   const chartRef = useRef(null);
 
@@ -55,12 +57,15 @@ export default function ProfileChart({ hop, title, subtitle, onReady, height = 2
     // est la vegetation, traitee comme milieu absorbant.
     const hasCanopy = s.canopy && s.canopy.some((v, i) => v > s.terrain[i] + 0.5);
 
+    const fresnelLowLabel = t('chart.fresnelLow');
+    const canopyLabel = t('chart.canopy');
+
     const cfg = {
       type: 'line',
       data: {
         datasets: [
           {
-            label: '1re zone de Fresnel',
+            label: t('chart.fresnelZone1'),
             data: pt(s.fresnelUp),
             borderColor: 'rgba(249, 115, 22, 0.55)',
             borderWidth: 1,
@@ -70,7 +75,7 @@ export default function ProfileChart({ hop, title, subtitle, onReady, height = 2
             order: 3,
           },
           {
-            label: 'Ligne de visee',
+            label: t('chart.los'),
             data: pt(s.los),
             borderColor: 'rgba(226, 232, 240, 0.9)',
             borderWidth: 1.6,
@@ -80,7 +85,7 @@ export default function ProfileChart({ hop, title, subtitle, onReady, height = 2
             order: 2,
           },
           {
-            label: 'Fresnel bas',
+            label: fresnelLowLabel,
             data: pt(s.fresnelDown),
             borderColor: 'rgba(249, 115, 22, 0.55)',
             borderWidth: 1,
@@ -89,7 +94,7 @@ export default function ProfileChart({ hop, title, subtitle, onReady, height = 2
             order: 3,
           },
           {
-            label: 'Seuil 60 % de Fresnel',
+            label: t('chart.fresnelThreshold60'),
             data: pt(f60),
             borderColor: 'rgba(251, 191, 36, 0.85)',
             borderWidth: 1.2,
@@ -99,7 +104,7 @@ export default function ProfileChart({ hop, title, subtitle, onReady, height = 2
             order: 3,
           },
           {
-            label: 'Couvert vegetal',
+            label: canopyLabel,
             data: pt(hasCanopy ? s.canopy : s.terrain),
             borderColor: 'rgba(34, 197, 94, 0.75)',
             backgroundColor: 'rgba(34, 197, 94, 0.28)',
@@ -111,7 +116,7 @@ export default function ProfileChart({ hop, title, subtitle, onReady, height = 2
             hidden: !hasCanopy,
           },
           {
-            label: 'Relief (corrige 4/3)',
+            label: t('chart.terrain'),
             data: pt(s.terrain),
             borderColor: 'rgba(161, 161, 170, 0.95)',
             backgroundColor: 'rgba(113, 113, 122, 0.42)',
@@ -132,12 +137,12 @@ export default function ProfileChart({ hop, title, subtitle, onReady, height = 2
         scales: {
           x: {
             type: 'linear',
-            title: { display: true, text: 'Distance (km)', color: TICK, font: { size: 10 } },
+            title: { display: true, text: t('chart.distanceAxis'), color: TICK, font: { size: 10 } },
             grid: { color: GRID },
             ticks: { color: TICK, font: { size: 10 }, maxTicksLimit: 8 },
           },
           y: {
-            title: { display: true, text: 'Altitude (m)', color: TICK, font: { size: 10 } },
+            title: { display: true, text: t('chart.elevationAxis'), color: TICK, font: { size: 10 } },
             grid: { color: GRID },
             ticks: { color: TICK, font: { size: 10 } },
           },
@@ -150,8 +155,8 @@ export default function ProfileChart({ hop, title, subtitle, onReady, height = 2
               boxHeight: 2,
               font: { size: 10 },
               filter: (item) =>
-                item.text !== 'Fresnel bas' &&
-                !(item.text === 'Couvert vegetal' && !hasCanopy),
+                item.text !== fresnelLowLabel &&
+                !(item.text === canopyLabel && !hasCanopy),
             },
           },
           tooltip: {
@@ -165,7 +170,7 @@ export default function ProfileChart({ hop, title, subtitle, onReady, height = 2
               label: (item) => `${item.dataset.label} : ${item.parsed.y.toFixed(1)} m`,
             },
           },
-          criticalMarker: { point: hop.worstPoint },
+          criticalMarker: { point: hop.worstPoint, label: t('chart.dominantObstacle') },
         },
       },
       plugins: [criticalMarker],
@@ -177,7 +182,7 @@ export default function ProfileChart({ hop, title, subtitle, onReady, height = 2
       chartRef.current?.destroy();
       chartRef.current = null;
     };
-  }, [hop, onReady]);
+  }, [hop, onReady, t]);
 
   if (!hop?.series) return null;
 

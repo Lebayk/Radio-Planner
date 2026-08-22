@@ -2,9 +2,11 @@ import React, { useEffect, useRef, useState } from 'react';
 import { Field, NumberInput, TextInput, Spinner } from './ui.jsx';
 import { geocode } from '../lib/osm.js';
 import { toDMS } from '../lib/geo.js';
+import { useI18n } from '../lib/i18n.js';
 
 /** Recherche d adresse Nominatim, avec anti-rebond et annulation. */
 function AddressSearch({ onPick }) {
+  const { t } = useI18n();
   const [q, setQ] = useState('');
   const [items, setItems] = useState(null);
   const [busy, setBusy] = useState(false);
@@ -37,7 +39,7 @@ function AddressSearch({ onPick }) {
       try {
         setItems(await geocode(value, ctl.signal));
       } catch (e) {
-        if (e.name !== 'AbortError') setErr('Recherche indisponible');
+        if (e.name !== 'AbortError') setErr(t('site.searchUnavailable'));
       } finally {
         setBusy(false);
       }
@@ -46,11 +48,11 @@ function AddressSearch({ onPick }) {
 
   return (
     <div ref={box} className="relative">
-      <span className="field-label">Rechercher une adresse</span>
+      <span className="field-label">{t('site.searchAddress')}</span>
       <div className="relative">
         <input
           className="input pr-8"
-          placeholder="Commune, lieu-dit, adresse..."
+          placeholder={t('site.searchPlaceholder')}
           value={q}
           onChange={(e) => {
             setQ(e.target.value);
@@ -72,7 +74,7 @@ function AddressSearch({ onPick }) {
       {err && <p className="mt-1 text-[11px] text-amber-400/80">{err}</p>}
       {items && (
         <ul className="absolute z-[1200] mt-1 max-h-56 w-full overflow-auto rounded-lg border border-ink-500 bg-ink-800 shadow-2xl">
-          {items.length === 0 && <li className="px-3 py-2 text-[12px] text-zinc-500">Aucun resultat</li>}
+          {items.length === 0 && <li className="px-3 py-2 text-[12px] text-zinc-500">{t('site.searchNoResult')}</li>}
           {items.map((it, i) => (
             <li key={i}>
               <button
@@ -95,21 +97,22 @@ function AddressSearch({ onPick }) {
 }
 
 export default function SitePanel({ site, onChange, color, picking, onPickToggle, elevation, elevBusy }) {
+  const { t } = useI18n();
   const set = (patch) => onChange({ ...site, ...patch });
 
   return (
     <div className="space-y-3">
-      <Field label="Nom du site">
-        <TextInput value={site.name} onChange={(v) => set({ name: v })} placeholder="Nom" />
+      <Field label={t('site.name')}>
+        <TextInput value={site.name} onChange={(v) => set({ name: v })} placeholder={t('site.namePlaceholder')} />
       </Field>
 
       <AddressSearch onPick={(p) => set({ lat: p.lat, lon: p.lon, name: site.name || p.label.split(',')[0] })} />
 
       <div className="grid grid-cols-2 gap-2">
-        <Field label="Latitude">
+        <Field label={t('site.latitude')}>
           <NumberInput value={site.lat} onChange={(v) => set({ lat: v })} min={-90} max={90} step="0.00001" />
         </Field>
-        <Field label="Longitude">
+        <Field label={t('site.longitude')}>
           <NumberInput value={site.lon} onChange={(v) => set({ lon: v })} min={-180} max={180} step="0.00001" />
         </Field>
       </div>
@@ -119,7 +122,7 @@ export default function SitePanel({ site, onChange, color, picking, onPickToggle
           <div className="font-mono text-zinc-400">{toDMS(site.lat, true)}</div>
           <div className="font-mono text-zinc-400">{toDMS(site.lon, false)}</div>
           <div className="mt-1">
-            Altitude sol :{' '}
+            {t('site.groundElevation')}{' '}
             <span className="font-mono text-zinc-300">
               {elevBusy ? '...' : Number.isFinite(elevation) ? `${elevation.toFixed(0)} m` : '-'}
             </span>
@@ -129,21 +132,21 @@ export default function SitePanel({ site, onChange, color, picking, onPickToggle
           type="button"
           onClick={onPickToggle}
           className={picking ? 'btn border-sky-500 bg-sky-600 text-white' : 'btn-ghost'}
-          title="Definir la position par un clic sur la carte"
+          title={t('site.pickOnMapTitle')}
         >
           <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.2">
             <path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11z" strokeLinejoin="round" />
             <circle cx="12" cy="10" r="2.4" />
           </svg>
-          {picking ? 'Cliquez...' : 'Carte'}
+          {picking ? t('site.picking') : t('site.pickMap')}
         </button>
       </div>
 
       <div className="grid grid-cols-2 gap-2">
-        <Field label="Hauteur antenne">
+        <Field label={t('site.antennaHeight')}>
           <NumberInput value={site.height} onChange={(v) => set({ height: v })} min={0} max={120} suffix="m" />
         </Field>
-        <Field label="Gain antenne">
+        <Field label={t('site.antennaGain')}>
           <NumberInput value={site.gain} onChange={(v) => set({ gain: v })} min={-6} max={25} suffix="dBi" />
         </Field>
       </div>

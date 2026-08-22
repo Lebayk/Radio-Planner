@@ -543,7 +543,32 @@ réels.**
 
 ---
 
-## Pile technique
+## Interface bilingue (FR/EN)
+
+Toute l'interface, la carte, les graphiques et les trois exports (GPX, KML,
+PDF) existent en français et en anglais. Bascule FR/EN dans l'en-tête,
+persistée en `localStorage` ; à défaut de préférence enregistrée, la langue
+du navigateur (`navigator.language`) decide au premier chargement — y compris
+pour le nom par défaut des deux sites (« Emetteur/Recepteur » vs
+« Transmitter/Receiver »), pour qu'un champ modifiable ne se lise pas comme
+un bug d'interface figé en français.
+
+Implémentation dans [`src/lib/strings.js`](src/lib/strings.js) (dictionnaire
+plat `cle -> [FR, EN]` et `tFor(lang, cle, vars)`, sans dépendance à React —
+c'est ce module, pas la couche React, que `radio.js` importe pour traduire
+les verdicts, afin de ne pas embarquer React dans le bundle du
+[Web Worker](src/workers/scan.worker.js)) et
+[`src/lib/i18n.js`](src/lib/i18n.js) (contexte React, hook `useI18n()`,
+`t()` pour du texte simple et `tn()` pour interpoler du JSX — un nombre en
+gras au milieu d'une phrase — sans casser l'ordre des mots d'une langue à
+l'autre).
+
+**Hors périmètre, assumé** : les descriptions techniques du catalogue de
+matériel radio ([`DEVICES`](src/lib/radio.js), fiches produit détaillées) et
+de la réglementation par région ont été traduites, mais quelques messages
+d'erreur très en profondeur (réponse malformée d'un fournisseur MNT,
+profil d'altitude indisponible sur un point precis) restent en français
+uniquement : ce sont des pannes rares, pas des textes d'interface.
 
 React 18 + Vite 6, Tailwind 3, Leaflet 1.9, Chart.js 4, jsPDF (chargé à la
 demande). Calculs dans un Web Worker ES module. Cache MNT en localStorage,

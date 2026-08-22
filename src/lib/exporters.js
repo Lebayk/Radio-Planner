@@ -1,11 +1,17 @@
 // Exports : GPX, KML et rapport PDF.
+//
+// Modules purs (pas de contexte React) : la langue voyage explicitement via
+// `data.lang`, lue par l appelant (App.jsx) depuis `useI18n()`. A defaut,
+// tout repli en francais pour ne rien casser si l appelant l omet.
 
 import { PRESET_BY_ID, REGION_BY_ID, erp, eirp, erpLimitFor, assessLink } from './radio.js';
 import { PROVIDER_BY_ID } from './elevation.js';
 import { toDMS, bearing, formatBearing } from './geo.js';
+import { tFor } from './strings.js';
 
-export const DISCLAIMER_SHORT =
-  'Relief IGN, vegetation et bati OpenStreetMap. Les hauteurs de couvert sont des valeurs par defaut : OSM ne renseigne presque jamais la hauteur de la vegetation, et seuls 8 % des batiments portent une hauteur. Le bruit radio local, les reflexions et la variabilite temporelle ne sont pas modelises. Toute simulation doit etre confirmee par un test terrain avec deux noeuds reels.';
+export function disclaimerShort(lang = 'fr') {
+  return tFor(lang, 'export.disclaimerShort');
+}
 
 const esc = (s) =>
   String(s ?? '')
@@ -45,41 +51,44 @@ const stamp = () => new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
  * Une chaine peut compter plusieurs relais : on l exporte en entier, sinon le
  * fichier decrirait un trajet qui n existe pas.
  */
-function linkPoints(tx, rx, relay, chain) {
+function linkPoints(tx, rx, relay, chain, lang) {
   if (chain?.nodes?.length > 2) {
     return withBearings(
       chain.nodes.map((n, i) => {
         if (i === 0) {
-          return { name: tx.name || 'TX', lat: n.lat, lon: n.lon, ele: n.elev, role: 'Emetteur' };
+          return { name: tx.name || 'TX', lat: n.lat, lon: n.lon, ele: n.elev, role: tFor(lang, 'export.tx'), kind: 'tx' };
         }
         if (i === chain.nodes.length - 1) {
-          return { name: rx.name || 'RX', lat: n.lat, lon: n.lon, ele: n.elev, role: 'Recepteur' };
+          return { name: rx.name || 'RX', lat: n.lat, lon: n.lon, ele: n.elev, role: tFor(lang, 'export.rx'), kind: 'rx' };
         }
         return {
-          name: `RELAIS ${i}`,
+          name: tFor(lang, 'export.relayNameN', { n: i }),
           lat: n.lat,
           lon: n.lon,
           ele: n.elev,
-          role: `Relais ${i} sur ${chain.relays} (antenne ${n.height} m)`,
+          role: tFor(lang, 'export.relayRoleN', { n: i, total: chain.relays, h: n.height }),
+          kind: 'relay',
         };
-      })
+      }),
+      lang
     );
   }
 
   const pts = [
-    { name: tx.name || 'TX', lat: tx.lat, lon: tx.lon, ele: tx.elev, role: 'Emetteur' },
-    { name: rx.name || 'RX', lat: rx.lat, lon: rx.lon, ele: rx.elev, role: 'Recepteur' },
+    { name: tx.name || 'TX', lat: tx.lat, lon: tx.lon, ele: tx.elev, role: tFor(lang, 'export.tx'), kind: 'tx' },
+    { name: rx.name || 'RX', lat: rx.lat, lon: rx.lon, ele: rx.elev, role: tFor(lang, 'export.rx'), kind: 'rx' },
   ];
   if (relay) {
     pts.splice(1, 0, {
-      name: 'RELAIS',
+      name: tFor(lang, 'export.relayName'),
       lat: relay.lat,
       lon: relay.lon,
       ele: relay.elev,
-      role: `Relais (antenne ${relay.height} m)`,
+      role: tFor(lang, 'export.relayRole', { h: relay.height }),
+      kind: 'relay',
     });
   }
-  return withBearings(pts);
+  return withBearings(pts, lang);
 }
 
 /**
@@ -89,12 +98,14 @@ function linkPoints(tx, rx, relay, chain) {
  * est directionnel. Calcule sur le grand cercle (nord vrai), pas une simple
  * reciproque a 180 deg.
  */
-function withBearings(pts) {
+function withBearings(pts, lang) {
   return pts.map((p, i) => {
     const caps = [];
-    if (i < pts.length - 1) caps.push(`vers ${pts[i + 1].name} : ${formatBearing(bearing(p, pts[i + 1]))}`);
-    if (i > 0) caps.push(`vers ${pts[i - 1].name} : ${formatBearing(bearing(p, pts[i - 1]))}`);
-    return caps.length ? { ...p, role: `${p.role} - Cap antenne (nord vrai) ${caps.join(' / ')}` } : p;
+    if (i < pts.length - 1)
+      caps.push(tFor(lang, 'export.capTowards', { name: pts[i + 1].name, cap: formatBearing(bearing(p, pts[i + 1])) }));
+    if (i > 0)
+      caps.push(tFor(lang, 'export.capTowards', { name: pts[i - 1].name, cap: formatBearing(bearing(p, pts[i - 1])) }));
+    return caps.length ? { ...p, role: `${p.role}${tFor(lang, 'export.antennaCap', { caps: caps.join(' / ') })}` } : p;
   });
 }
 
@@ -102,8 +113,8 @@ function withBearings(pts) {
 // GPX
 // ---------------------------------------------------------------------------
 
-export function buildGpx({ tx, rx, relay, chain }) {
-  const pts = linkPoints(tx, rx, relay, chain);
+export function buildGpx({ tx, rx, relay, chain, lang = 'fr' }) {
+  const pts = linkPoints(tx, rx, relay, chain, lang);
   const wpts = pts
     .map(
       (p) =>
@@ -128,10 +139,10 @@ export function buildGpx({ tx, rx, relay, chain }) {
   return (
     `<?xml version="1.0" encoding="UTF-8"?>\n` +
     `<gpx version="1.1" creator="LoRa Relay Planner" xmlns="http://www.topografix.com/GPX/1/1">\n` +
-    `  <metadata>\n    <name>Liaison LoRa ${esc(tx.name)} - ${esc(rx.name)}</name>\n` +
-    `    <desc>${esc(DISCLAIMER_SHORT)}</desc>\n    <time>${new Date().toISOString()}</time>\n  </metadata>\n` +
+    `  <metadata>\n    <name>${esc(tFor(lang, 'export.linkName', { tx: tx.name, rx: rx.name }))}</name>\n` +
+    `    <desc>${esc(disclaimerShort(lang))}</desc>\n    <time>${new Date().toISOString()}</time>\n  </metadata>\n` +
     `${wpts}\n` +
-    `  <trk>\n    <name>Trajet radio</name>\n    <trkseg>\n${trkpts}\n    </trkseg>\n  </trk>\n` +
+    `  <trk>\n    <name>${esc(tFor(lang, 'export.radioTrack'))}</name>\n    <trkseg>\n${trkpts}\n    </trkseg>\n  </trk>\n` +
     `</gpx>\n`
   );
 }
@@ -144,18 +155,18 @@ export function exportGpx(data) {
 // KML
 // ---------------------------------------------------------------------------
 
-export function buildKml({ tx, rx, relay, result, chain, desiredMargin = 10 }) {
-  const pts = linkPoints(tx, rx, relay, chain);
+export function buildKml({ tx, rx, relay, result, chain, desiredMargin = 10, lang = 'fr' }) {
+  const pts = linkPoints(tx, rx, relay, chain, lang);
   const coordStr = pts
     .map((p) => `${p.lon.toFixed(6)},${p.lat.toFixed(6)},${Number.isFinite(p.ele) ? p.ele.toFixed(1) : 0}`)
     .join(' ');
 
   const placemarks = pts
     .map((p) => {
-      const style = p.name.startsWith('RELAIS') ? '#relais' : '#site';
+      const style = p.kind === 'relay' ? '#relais' : '#site';
       const desc = [
         p.role,
-        Number.isFinite(p.ele) ? `Altitude sol : ${p.ele.toFixed(0)} m` : null,
+        Number.isFinite(p.ele) ? tFor(lang, 'export.groundAltitude', { e: p.ele.toFixed(0) }) : null,
         `${toDMS(p.lat, true)} / ${toDMS(p.lon, false)}`,
       ]
         .filter(Boolean)
@@ -178,29 +189,30 @@ export function buildKml({ tx, rx, relay, result, chain, desiredMargin = 10 }) {
         clearance: result.clearance,
         desiredMargin,
         foliage: result.foliage,
+        lang,
       })
     : null;
   const summary = result
     ? `${v.label.toUpperCase()}\n\n${v.reason}\n\n` +
-      `Marge bond 1 : ${result.hop1.margin.toFixed(1)} dB\n` +
-      `Marge bond 2 : ${result.hop2.margin.toFixed(1)} dB\n` +
-      `Marge globale mediane : ${result.margin.toFixed(1)} dB\n` +
-      `Marge tenue sur 95 % des emplacements : ${result.margin95.toFixed(1)} dB\n` +
-      `Vegetation traversee : ${(result.foliage ?? 0).toFixed(1)} dB`
+      `${tFor(lang, 'export.kml.hop1Margin', { v: result.hop1.margin.toFixed(1) })}\n` +
+      `${tFor(lang, 'export.kml.hop2Margin', { v: result.hop2.margin.toFixed(1) })}\n` +
+      `${tFor(lang, 'export.kml.overallMedian', { v: result.margin.toFixed(1) })}\n` +
+      `${tFor(lang, 'export.kml.held95', { v: result.margin95.toFixed(1) })}\n` +
+      tFor(lang, 'export.kml.foliage', { v: (result.foliage ?? 0).toFixed(1) })
     : '';
 
   return (
     `<?xml version="1.0" encoding="UTF-8"?>\n` +
     `<kml xmlns="http://www.opengis.net/kml/2.2">\n  <Document>\n` +
-    `    <name>Liaison LoRa ${esc(tx.name)} - ${esc(rx.name)}</name>\n` +
-    `    <description>${esc(summary + (summary ? '\n\n' : '') + DISCLAIMER_SHORT)}</description>\n` +
+    `    <name>${esc(tFor(lang, 'export.linkName', { tx: tx.name, rx: rx.name }))}</name>\n` +
+    `    <description>${esc(summary + (summary ? '\n\n' : '') + disclaimerShort(lang))}</description>\n` +
     `    <Style id="site"><IconStyle><color>ff8b4513</color><scale>1.1</scale>` +
     `<Icon><href>http://maps.google.com/mapfiles/kml/paddle/blu-circle.png</href></Icon></IconStyle></Style>\n` +
     `    <Style id="relais"><IconStyle><color>ff22c55e</color><scale>1.3</scale>` +
     `<Icon><href>http://maps.google.com/mapfiles/kml/paddle/grn-stars.png</href></Icon></IconStyle></Style>\n` +
     `    <Style id="lien"><LineStyle><color>ff22c55e</color><width>3</width></LineStyle></Style>\n` +
     `${placemarks}\n` +
-    `    <Placemark>\n      <name>Trajet radio</name>\n      <styleUrl>#lien</styleUrl>\n` +
+    `    <Placemark>\n      <name>${esc(tFor(lang, 'export.radioTrack'))}</name>\n      <styleUrl>#lien</styleUrl>\n` +
     `      <LineString><tessellate>1</tessellate><coordinates>${coordStr}</coordinates></LineString>\n` +
     `    </Placemark>\n  </Document>\n</kml>\n`
   );
@@ -238,7 +250,8 @@ export function preloadPdf() {
  */
 export async function exportPdf(data, images = {}) {
   const { jsPDF } = await preloadPdf();
-  const { tx, rx, relay, radio, search, provider, result, top, chain, direct } = data;
+  const { tx, rx, relay, radio, search, provider, result, top, chain, direct, lang = 'fr' } = data;
+  const tt = (key, vars) => tFor(lang, key, vars);
 
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const W = 210;
@@ -292,7 +305,7 @@ export async function exportPdf(data, images = {}) {
   doc.setFontSize(9);
   doc.setTextColor(180, 190, 205);
   doc.text(
-    `Etude d implantation de relais - ${new Date().toLocaleString('fr-FR')}`,
+    tt('export.pdf.studyTitle', { date: new Date().toLocaleString(lang === 'fr' ? 'fr-FR' : 'en-US') }),
     M,
     18.5
   );
@@ -308,16 +321,21 @@ export async function exportPdf(data, images = {}) {
       desiredMargin: radio.desiredMargin,
       foliage: result.foliage,
       sigma: Math.max(result.hop1?.sigma ?? 0, result.hop2?.sigma ?? 0),
+      lang,
     });
     const fill = { ok: [232, 248, 238], warn: [255, 246, 224], error: [253, 232, 234] }[v.tone];
     const ink = { ok: [21, 105, 63], warn: [140, 90, 10], error: [160, 30, 45] }[v.tone];
     const body = doc.splitTextToSize(v.reason, W - 2 * M - 8);
     const vegLine = doc.splitTextToSize(
-      `Marge mediane ${v.margin50.toFixed(1)} dB, tenue sur 95 % des emplacements ` +
-        `${v.margin95.toFixed(1)} dB (dispersion ${v.sigma.toFixed(1)} dB). ` +
-        (result.foliage > 0.5
-          ? `Vegetation traversee : ${result.foliage.toFixed(1)} dB.`
-          : 'Aucune vegetation traversee sur le trajet.'),
+      tt('export.pdf.medianMarginLine', {
+        m50: v.margin50.toFixed(1),
+        m95: v.margin95.toFixed(1),
+        sigma: v.sigma.toFixed(1),
+        foliage:
+          result.foliage > 0.5
+            ? tt('export.pdf.foliageCrossed', { v: result.foliage.toFixed(1) })
+            : tt('export.pdf.noFoliage'),
+      }),
       W - 2 * M - 8
     );
     const boxH = 16 + body.length * 4 + vegLine.length * 3.6;
@@ -355,17 +373,31 @@ export async function exportPdf(data, images = {}) {
   const rxTarget = isChainRoute ? chain.nodes[chain.nodes.length - 2] : relay || tx;
   const capOf = (origin, target) => (target ? formatBearing(bearing(origin, target)) : '-');
 
-  heading('Sites');
+  heading(tt('export.pdf.sites'));
   kv([
     [
-      'Emetteur (TX)',
-      `${tx.name} - ${tx.lat.toFixed(5)}, ${tx.lon.toFixed(5)} - sol ${fmt(tx.elev, 0, 'm')} - antenne ${tx.height} m / ${tx.gain} dBi` +
-        ` - cap antenne ${capOf(tx, txTarget)}`,
+      tt('export.pdf.tx'),
+      tt('export.pdf.txLine', {
+        name: tx.name,
+        lat: tx.lat.toFixed(5),
+        lon: tx.lon.toFixed(5),
+        elev: fmt(tx.elev, 0, 'm'),
+        h: tx.height,
+        gain: tx.gain,
+        cap: capOf(tx, txTarget),
+      }),
     ],
     [
-      'Recepteur (RX)',
-      `${rx.name} - ${rx.lat.toFixed(5)}, ${rx.lon.toFixed(5)} - sol ${fmt(rx.elev, 0, 'm')} - antenne ${rx.height} m / ${rx.gain} dBi` +
-        ` - cap antenne ${capOf(rx, rxTarget)}`,
+      tt('export.pdf.rx'),
+      tt('export.pdf.txLine', {
+        name: rx.name,
+        lat: rx.lat.toFixed(5),
+        lon: rx.lon.toFixed(5),
+        elev: fmt(rx.elev, 0, 'm'),
+        h: rx.height,
+        gain: rx.gain,
+        cap: capOf(rx, rxTarget),
+      }),
     ],
   ]);
   if (relay) {
@@ -373,17 +405,27 @@ export async function exportPdf(data, images = {}) {
     const d2 = result?.hop2?.distM;
     kv([
       [
-        'Relais retenu',
-        `${relay.lat.toFixed(5)}, ${relay.lon.toFixed(5)} - sol ${fmt(relay.elev, 0, 'm')} - antenne ${relay.height} m / ${radio.relayGain} dBi` +
-          ` - cap vers TX ${capOf(relay, tx)} / cap vers RX ${capOf(relay, rx)}`,
+        tt('export.pdf.relayRetained'),
+        tt('export.pdf.relayLine', {
+          lat: relay.lat.toFixed(5),
+          lon: relay.lon.toFixed(5),
+          elev: fmt(relay.elev, 0, 'm'),
+          h: relay.height,
+          gain: radio.relayGain,
+          capTx: capOf(relay, tx),
+          capRx: capOf(relay, rx),
+        }),
       ],
     ]);
     if (Number.isFinite(d1) && Number.isFinite(d2)) {
       kv([
         [
-          'Distances',
-          `TX ${fmt(d1 / 1000, 2, 'km')} - RX ${fmt(d2 / 1000, 2, 'km')} ` +
-            `(trajet total ${fmt((d1 + d2) / 1000, 2, 'km')})`,
+          tt('export.pdf.distances'),
+          tt('export.pdf.distancesLine', {
+            d1: fmt(d1 / 1000, 2, 'km'),
+            d2: fmt(d2 / 1000, 2, 'km'),
+            total: fmt((d1 + d2) / 1000, 2, 'km'),
+          }),
         ],
       ]);
     }
@@ -391,12 +433,7 @@ export async function exportPdf(data, images = {}) {
   if (!isChainRoute && (relay || result)) {
     doc.setFontSize(8);
     doc.setTextColor(110, 110, 110);
-    doc.text(
-      'Caps en azimut geographique (nord vrai) : corrigez de la declinaison magnetique locale ' +
-        'pour une boussole classique.',
-      M,
-      y
-    );
+    doc.text(tt('export.pdf.declinationNote'), M, y);
     doc.setFontSize(9);
     doc.setTextColor(40, 40, 40);
     line(5);
@@ -405,16 +442,15 @@ export async function exportPdf(data, images = {}) {
   // La chaine est la solution recommandee : sans elle le rapport decrit une
   // liaison a relais unique qui n est pas celle que l on preconise.
   if (chain?.nodes?.length > 2) {
-    heading('Chaine de relais');
+    heading(tt('export.pdf.chainTitle'));
     const labelOf = (i) =>
       i === 0 ? 'TX' : i === chain.nodes.length - 1 ? 'RX' : `R${i}`;
 
     kv([
       [
-        `${chain.relays} relais`,
-        (chain.feasible ? 'Objectif de marge atteint' : 'Objectif non atteint') +
-          ` - maillon le plus faible ${fmt(chain.margin95, 1, 'dB')} a 95 % ` +
-          `(objectif ${chain.target} dB)`,
+        tt('export.pdf.chainRelaysN', { n: chain.relays }),
+        (chain.feasible ? tt('export.pdf.chainAtteint') : tt('export.pdf.chainNonAtteint')) +
+          tt('export.pdf.chainSummaryLine', { margin: fmt(chain.margin95, 1, 'dB'), target: chain.target }),
       ],
     ]);
 
@@ -425,10 +461,18 @@ export async function exportPdf(data, images = {}) {
       kv([
         [
           labelOf(i),
-          `${n.lat.toFixed(5)}, ${n.lon.toFixed(5)} - sol ${fmt(n.elev, 0, 'm')} - mat ${n.height} m` +
-            ` - a ${fmt(dPrev / 1000, 2, 'km')} de ${labelOf(i - 1)}` +
-            ` et ${fmt(dNext / 1000, 2, 'km')} de ${labelOf(i + 1)}` +
-            ` - cap vers ${labelOf(i - 1)} ${capOf(n, chain.nodes[i - 1])} / cap vers ${labelOf(i + 1)} ${capOf(n, chain.nodes[i + 1])}`,
+          tt('export.pdf.nodeLine', {
+            lat: n.lat.toFixed(5),
+            lon: n.lon.toFixed(5),
+            elev: fmt(n.elev, 0, 'm'),
+            h: n.height,
+            dPrev: fmt(dPrev / 1000, 2, 'km'),
+            prevLabel: labelOf(i - 1),
+            dNext: fmt(dNext / 1000, 2, 'km'),
+            nextLabel: labelOf(i + 1),
+            capPrev: capOf(n, chain.nodes[i - 1]),
+            capNext: capOf(n, chain.nodes[i + 1]),
+          }),
         ],
       ]);
     });
@@ -436,9 +480,14 @@ export async function exportPdf(data, images = {}) {
     line(1);
     const hCols = [M, M + 28, M + 60, M + 82, M + 108, M + 132];
     doc.setFont('helvetica', 'bold');
-    ['Bond', 'Cap', 'Distance', 'Vegetation', 'Fresnel', 'Marge 95 %'].forEach((h, i) =>
-      doc.text(h, hCols[i], y)
-    );
+    [
+      tt('export.pdf.col.hop'),
+      tt('export.pdf.col.cap'),
+      tt('export.pdf.col.distance'),
+      tt('export.pdf.col.vegetation'),
+      tt('export.pdf.col.fresnel'),
+      tt('export.pdf.col.margin95'),
+    ].forEach((h, i) => doc.text(h, hCols[i], y));
     line(4.6);
     doc.setFont('helvetica', 'normal');
     (chain.hops || []).forEach((h, i) => {
@@ -459,10 +508,10 @@ export async function exportPdf(data, images = {}) {
     doc.setTextColor(110, 110, 110);
     doc.setFontSize(8);
     doc.text(
-      `Longueur cumulee du trajet : ${fmt(total / 1000, 2, 'km')}, ` +
-        `contre ${fmt((direct?.distM ?? 0) / 1000, 2, 'km')} a vol d oiseau. ` +
-        `Caps en azimut geographique (nord vrai) : corrigez de la declinaison magnetique locale ` +
-        `pour une boussole classique.`,
+      tt('export.pdf.chainFooter', {
+        total: fmt(total / 1000, 2, 'km'),
+        direct: fmt((direct?.distM ?? 0) / 1000, 2, 'km'),
+      }),
       M,
       y
     );
@@ -471,33 +520,37 @@ export async function exportPdf(data, images = {}) {
     line(5);
   }
 
-  heading('Parametres radio');
+  heading(tt('export.pdf.radioParams'));
   const eirpVal = eirp(radio.power, Math.max(tx.gain, rx.gain), radio.cableLoss);
   const erpVal = erp(radio.power, Math.max(tx.gain, rx.gain), radio.cableLoss);
   const limit = erpLimitFor(radio.region, radio.freq);
+  const regionLabel = tt(`radio.region.${region.id}.label`);
   kv([
-    ['Region / frequence', `${region.label} - ${radio.freq} MHz`],
-    ['Preset LoRa', `${preset.label} (SF${preset.sf}, BW ${preset.bw} kHz, sensibilite ${preset.sens} dBm)`],
-    ['Puissance', `${radio.power} dBm conduits - PIRE ${fmt(eirpVal, 1, 'dBm')} - ERP ${fmt(erpVal, 1, 'dBm')}`],
-    ['Limite reglementaire', `${limit} dBm ERP${erpVal > limit ? '  -- DEPASSEMENT --' : ''}`],
-    ['Perte cable', `${radio.cableLoss} dB par site`],
-    ['Marge souhaitee', `${radio.desiredMargin} dB`],
-    ['Modele numerique de terrain', PROVIDER_BY_ID[provider]?.label ?? provider],
-    ['Recherche', `rayon ${search.radius} m - pas ${search.step} m - hauteurs testees ${search.heights.join(', ')} m`],
+    [tt('export.pdf.regionFreq'), tt('export.pdf.regionFreqLine', { region: regionLabel, freq: radio.freq })],
+    [tt('radio.preset'), tt('export.pdf.presetLine', { preset: preset.label, sf: preset.sf, bw: preset.bw, sens: preset.sens })],
+    [tt('export.pdf.power'), tt('export.pdf.powerLine', { power: radio.power, eirp: fmt(eirpVal, 1, 'dBm'), erp: fmt(erpVal, 1, 'dBm') })],
+    [
+      tt('export.pdf.regLimit'),
+      tt('export.pdf.regLimitLine', { limit, over: erpVal > limit ? tt('export.pdf.overSuffix') : '' }),
+    ],
+    [tt('export.pdf.cableLoss'), tt('export.pdf.cableLossLine', { db: radio.cableLoss })],
+    [tt('export.pdf.desiredMargin'), `${radio.desiredMargin} dB`],
+    [tt('export.pdf.dem'), PROVIDER_BY_ID[provider]?.label ?? provider],
+    [tt('export.pdf.search'), tt('export.pdf.searchLine', { radius: search.radius, step: search.step, heights: search.heights.join(', ') })],
   ]);
 
   if (result) {
-    heading('Bilan de la liaison retenue');
+    heading(tt('export.pdf.linkSummary'));
     const rows = [
-      ['', 'Bond 1 (TX -> relais)', 'Bond 2 (relais -> RX)'],
-      ['Distance', fmt(result.hop1.distM / 1000, 2, 'km'), fmt(result.hop2.distM / 1000, 2, 'km')],
-      ['Perte espace libre', fmt(result.hop1.fspl, 1, 'dB'), fmt(result.hop2.fspl, 1, 'dB')],
-      ['Diffraction J(v)', fmt(result.hop1.diffraction, 1, 'dB'), fmt(result.hop2.diffraction, 1, 'dB')],
-      ['RSSI estime', fmt(result.hop1.rssi, 1, 'dBm'), fmt(result.hop2.rssi, 1, 'dBm')],
-      ['Vegetation', fmt(result.hop1.foliage, 1, 'dB'), fmt(result.hop2.foliage, 1, 'dB')],
-      ['Marge mediane', fmt(result.hop1.margin50, 1, 'dB'), fmt(result.hop2.margin50, 1, 'dB')],
-      ['Marge a 95 %', fmt(result.hop1.margin95, 1, 'dB'), fmt(result.hop2.margin95, 1, 'dB')],
-      ['Fresnel degagee', fmt(result.hop1.clearance * 100, 0, '%'), fmt(result.hop2.clearance * 100, 0, '%')],
+      ['', tt('export.pdf.hop1Col'), tt('export.pdf.hop2Col')],
+      [tt('export.pdf.rowDistance'), fmt(result.hop1.distM / 1000, 2, 'km'), fmt(result.hop2.distM / 1000, 2, 'km')],
+      [tt('export.pdf.rowFspl'), fmt(result.hop1.fspl, 1, 'dB'), fmt(result.hop2.fspl, 1, 'dB')],
+      [tt('export.pdf.rowDiffraction'), fmt(result.hop1.diffraction, 1, 'dB'), fmt(result.hop2.diffraction, 1, 'dB')],
+      [tt('export.pdf.rowRssi'), fmt(result.hop1.rssi, 1, 'dBm'), fmt(result.hop2.rssi, 1, 'dBm')],
+      [tt('export.pdf.rowVegetation'), fmt(result.hop1.foliage, 1, 'dB'), fmt(result.hop2.foliage, 1, 'dB')],
+      [tt('export.pdf.rowMedianMargin'), fmt(result.hop1.margin50, 1, 'dB'), fmt(result.hop2.margin50, 1, 'dB')],
+      [tt('export.pdf.rowMargin95'), fmt(result.hop1.margin95, 1, 'dB'), fmt(result.hop2.margin95, 1, 'dB')],
+      [tt('export.pdf.rowFresnel'), fmt(result.hop1.clearance * 100, 0, '%'), fmt(result.hop2.clearance * 100, 0, '%')],
     ];
     for (const [i, r] of rows.entries()) {
       doc.setFont('helvetica', i === 0 ? 'bold' : 'normal');
@@ -510,14 +563,13 @@ export async function exportPdf(data, images = {}) {
     }
     line(1);
     doc.setFont('helvetica', 'bold');
-    doc.text(`Marge globale (maillon faible) : ${fmt(result.margin, 1, 'dB')}`, M, y);
+    doc.text(tt('export.pdf.overallMargin', { v: fmt(result.margin, 1, 'dB') }), M, y);
     line(5);
     doc.setFont('helvetica', 'normal');
     if (direct) {
       doc.setTextColor(110, 110, 110);
       doc.text(
-        `Pour memoire, liaison directe TX-RX sans relais : marge ${fmt(direct.margin, 1, 'dB')}, ` +
-          `diffraction ${fmt(direct.diffraction, 1, 'dB')}.`,
+        tt('export.pdf.directRef', { margin: fmt(direct.margin, 1, 'dB'), diff: fmt(direct.diffraction, 1, 'dB') }),
         M,
         y
       );
@@ -527,8 +579,20 @@ export async function exportPdf(data, images = {}) {
   }
 
   if (top?.length) {
-    heading('Classement des emplacements');
-    const head = ['#', 'Latitude', 'Longitude', 'Alt.', 'Ht', 'd TX', 'd RX', 'B1', 'B2', 'Globale', 'Fresnel'];
+    heading(tt('export.pdf.ranking'));
+    const head = [
+      tt('export.pdf.col.n'),
+      tt('export.pdf.col.lat'),
+      tt('export.pdf.col.lon'),
+      tt('export.pdf.col.alt'),
+      tt('export.pdf.col.ht'),
+      tt('export.pdf.col.dTx'),
+      tt('export.pdf.col.dRx'),
+      tt('export.pdf.col.b1'),
+      tt('export.pdf.col.b2'),
+      tt('export.pdf.col.overall'),
+      tt('export.pdf.col.fresnel'),
+    ];
     const cols = [M, M + 7, M + 30, M + 53, M + 65, M + 76, M + 90, M + 104, M + 118, M + 132, M + 152];
     doc.setFont('helvetica', 'bold');
     head.forEach((h, i) => doc.text(h, cols[i], y));
@@ -554,8 +618,7 @@ export async function exportPdf(data, images = {}) {
     doc.setTextColor(110, 110, 110);
     doc.setFontSize(8);
     doc.text(
-      'Marges en dB, distances en km. Ht = hauteur d antenne retenue pour ce site, ' +
-        'd TX et d RX = distances aux deux extremites.',
+      tt('export.pdf.rankingNote'),
       M,
       y
     );
@@ -583,23 +646,19 @@ export async function exportPdf(data, images = {}) {
 
   // La carte en premier : c est la vue d ensemble, avant le detail des
   // profils bond par bond. Aspect 900/1400 = celui du canvas dessine.
-  addImage(images.coverageMap, 'Carte - liaison et portee du relais', 900 / 1400);
+  addImage(images.coverageMap, tt('export.pdf.mapTitle'), 900 / 1400);
   if (images.coverageMap) {
     doc.setFontSize(8);
     doc.setTextColor(110, 110, 110);
-    doc.text(
-      'Carte schematique (sans fond cartographique) : distances et positions exactes, relief non represente ici.',
-      M,
-      y
-    );
+    doc.text(tt('export.pdf.mapNote'), M, y);
     doc.setFontSize(9);
     doc.setTextColor(40, 40, 40);
     line(5);
   }
 
-  addImage(images.profile1, 'Profil bond 1 : TX -> relais');
-  addImage(images.profile2, 'Profil bond 2 : relais -> RX');
-  addImage(images.heights, 'Marge en fonction de la hauteur d antenne du relais');
+  addImage(images.profile1, tt('export.pdf.profile1Title'));
+  addImage(images.profile2, tt('export.pdf.profile2Title'));
+  addImage(images.heights, tt('export.pdf.heightsTitle'));
 
   // Avertissement
   if (y > 240) {
@@ -613,10 +672,10 @@ export async function exportPdf(data, images = {}) {
   doc.setFont('helvetica', 'bold');
   doc.setTextColor(120, 80, 0);
   doc.setFontSize(9);
-  doc.text('Avertissement', M + 4, y + 2);
+  doc.text(tt('export.pdf.warningTitle'), M + 4, y + 2);
   doc.setFont('helvetica', 'normal');
   doc.setFontSize(8);
-  const wrapped = doc.splitTextToSize(DISCLAIMER_SHORT, W - 2 * M - 8);
+  const wrapped = doc.splitTextToSize(disclaimerShort(lang), W - 2 * M - 8);
   doc.text(wrapped, M + 4, y + 7);
 
   return makeFile(`rapport-lora-relay-${stamp()}.pdf`, doc.output('blob'), 'application/pdf');

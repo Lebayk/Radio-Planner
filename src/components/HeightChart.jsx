@@ -1,5 +1,6 @@
 import React, { useEffect, useRef } from 'react';
 import Chart from 'chart.js/auto';
+import { useI18n } from '../lib/i18n.js';
 
 const GRID = 'rgba(148, 163, 184, 0.12)';
 const TICK = '#8b93a5';
@@ -27,12 +28,13 @@ const thresholdBand = {
     ctx.fillStyle = 'rgba(134, 239, 172, 0.9)';
     ctx.font = '600 10px Inter, system-ui, sans-serif';
     ctx.textAlign = 'left';
-    ctx.fillText(`marge souhaitee ${target} dB`, scales.x.left + 6, y - 5);
+    ctx.fillText(opts.label ?? `marge souhaitee ${target} dB`, scales.x.left + 6, y - 5);
     ctx.restore();
   },
 };
 
 export default function HeightChart({ rows, desiredMargin, currentHeight, onReady, height = 250 }) {
+  const { t } = useI18n();
   const canvasRef = useRef(null);
   const chartRef = useRef(null);
 
@@ -59,9 +61,9 @@ export default function HeightChart({ rows, desiredMargin, currentHeight, onRead
       data: {
         labels,
         datasets: [
-          series('margin', 'Marge globale (maillon faible)', '#38bdf8', { width: 2.6 }),
-          series('m1', 'Bond 1 : TX vers relais', '#a78bfa', { dash: [5, 3] }),
-          series('m2', 'Bond 2 : relais vers RX', '#f472b6', { dash: [5, 3] }),
+          series('margin', t('chart.overallMargin'), '#38bdf8', { width: 2.6 }),
+          series('m1', t('chart.hop1'), '#a78bfa', { dash: [5, 3] }),
+          series('m2', t('chart.hop2'), '#f472b6', { dash: [5, 3] }),
         ],
       },
       options: {
@@ -71,12 +73,12 @@ export default function HeightChart({ rows, desiredMargin, currentHeight, onRead
         interaction: { mode: 'index', intersect: false },
         scales: {
           x: {
-            title: { display: true, text: 'Hauteur d antenne du relais (m)', color: TICK, font: { size: 10 } },
+            title: { display: true, text: t('chart.antennaHeightAxis'), color: TICK, font: { size: 10 } },
             grid: { color: GRID },
             ticks: { color: TICK, font: { size: 10 } },
           },
           y: {
-            title: { display: true, text: 'Marge (dB)', color: TICK, font: { size: 10 } },
+            title: { display: true, text: t('chart.marginAxis'), color: TICK, font: { size: 10 } },
             grid: { color: GRID },
             ticks: { color: TICK, font: { size: 10 } },
           },
@@ -90,11 +92,11 @@ export default function HeightChart({ rows, desiredMargin, currentHeight, onRead
             titleColor: '#e4e4e7',
             bodyColor: '#a1a1aa',
             callbacks: {
-              title: (items) => `Antenne a ${items[0].label} m`,
+              title: (items) => t('chart.antennaAt', { h: items[0].label }),
               label: (item) => `${item.dataset.label} : ${item.parsed.y.toFixed(1)} dB`,
             },
           },
-          thresholdBand: { target: desiredMargin },
+          thresholdBand: { target: desiredMargin, label: t('chart.desiredMarginLabel', { db: desiredMargin }) },
         },
       },
       plugins: [thresholdBand],
@@ -104,7 +106,7 @@ export default function HeightChart({ rows, desiredMargin, currentHeight, onRead
       chartRef.current?.destroy();
       chartRef.current = null;
     };
-  }, [rows, desiredMargin, currentHeight, onReady]);
+  }, [rows, desiredMargin, currentHeight, onReady, t]);
 
   if (!rows?.length) return null;
 
@@ -120,18 +122,17 @@ export default function HeightChart({ rows, desiredMargin, currentHeight, onRead
         <canvas ref={canvasRef} />
       </div>
       <p className="mt-2 text-[12px] leading-relaxed text-zinc-400">
-        {firstOk ? (
-          <>
-            La marge souhaitee de <b className="text-zinc-200">{desiredMargin} dB</b> est atteinte des{' '}
-            <b className="text-emerald-300">{firstOk.height} m</b> de hauteur d antenne.
-          </>
-        ) : (
-          <>
-            La marge souhaitee de <b className="text-zinc-200">{desiredMargin} dB</b> n est jamais atteinte sur
-            cette plage : le meilleur resultat est {bestRow.margin.toFixed(1)} dB a {bestRow.height} m.
-          </>
-        )}{' '}
-        Passer de {rows[0].height} m a {bestRow.height} m rapporte {gain.toFixed(1)} dB.
+        {firstOk
+          ? t('height.reachedAt', {
+              margin: `${desiredMargin} dB`,
+              height: `${firstOk.height} m`,
+            })
+          : t('height.neverReached', {
+              margin: `${desiredMargin} dB`,
+              best: `${bestRow.margin.toFixed(1)} dB`,
+              bestHeight: `${bestRow.height} m`,
+            })}
+        {t('height.gain', { from: `${rows[0].height} m`, to: `${bestRow.height} m`, gain: `${gain.toFixed(1)} dB` })}
       </p>
     </div>
   );

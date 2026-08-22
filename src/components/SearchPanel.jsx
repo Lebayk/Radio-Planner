@@ -2,11 +2,13 @@ import React, { useState } from 'react';
 import { Field, NumberInput, Select, Checkbox, Banner, TextInput } from './ui.jsx';
 import { PROVIDERS, PROVIDER_BY_ID, getOpenTopoDataBase, setOpenTopoDataBase } from '../lib/elevation.js';
 import { formatBearing } from '../lib/geo.js';
+import { useI18n } from '../lib/i18n.js';
 
 const PRESET_HEIGHTS = [2, 4, 6, 8, 10, 12, 15, 20, 25, 30];
 
 /** Selection multiple des hauteurs d antenne du relais a tester. */
 function HeightPicker({ heights, onChange }) {
+  const { t } = useI18n();
   const [custom, setCustom] = useState('');
   const toggle = (h) => {
     const next = heights.includes(h) ? heights.filter((x) => x !== h) : [...heights, h];
@@ -22,7 +24,7 @@ function HeightPicker({ heights, onChange }) {
 
   return (
     <div>
-      <span className="field-label">Hauteurs d antenne du relais a tester</span>
+      <span className="field-label">{t('search.heightsLabel')}</span>
       <div className="flex flex-wrap gap-1.5">
         {[...new Set([...PRESET_HEIGHTS, ...heights])]
           .sort((a, b) => a - b)
@@ -47,29 +49,28 @@ function HeightPicker({ heights, onChange }) {
       <div className="mt-2 flex gap-2">
         <input
           className="input flex-1"
-          placeholder="Autre hauteur"
+          placeholder={t('search.otherHeight')}
           inputMode="decimal"
           value={custom}
           onChange={(e) => setCustom(e.target.value)}
           onKeyDown={(e) => e.key === 'Enter' && (e.preventDefault(), addCustom())}
         />
         <button type="button" className="btn-ghost" onClick={addCustom}>
-          Ajouter
+          {t('search.add')}
         </button>
       </div>
       {heights.length === 0 && (
-        <p className="mt-1 text-[11px] text-amber-400/80">Selectionnez au moins une hauteur.</p>
+        <p className="mt-1 text-[11px] text-amber-400/80">{t('search.selectAtLeastOne')}</p>
       )}
       {heights.length > 6 && (
-        <p className="mt-1 text-[11px] text-zinc-500">
-          {heights.length} hauteurs : le balayage sera d autant plus long.
-        </p>
+        <p className="mt-1 text-[11px] text-zinc-500">{t('search.manyHeights', { n: heights.length })}</p>
       )}
     </div>
   );
 }
 
 export default function SearchPanel({ search, onChange, provider, onProviderChange, estimate, linkLength, linkBearing }) {
+  const { t, locale } = useI18n();
   const set = (patch) => onChange({ ...search, ...patch });
   const p = PROVIDER_BY_ID[provider];
   const tooFine = search.step < p.resolution * 0.8;
@@ -80,18 +81,15 @@ export default function SearchPanel({ search, onChange, provider, onProviderChan
       <HeightPicker heights={search.heights} onChange={(v) => set({ heights: v })} />
 
       <div className="grid grid-cols-2 gap-2">
-        <Field label="Rayon autour de l axe">
+        <Field label={t('search.radius')}>
           <NumberInput value={search.radius} onChange={(v) => set({ radius: v })} min={50} max={5000} step="50" suffix="m" />
         </Field>
-        <Field label="Pas de la grille">
+        <Field label={t('search.step')}>
           <NumberInput value={search.step} onChange={(v) => set({ step: v })} min={10} max={500} step="10" suffix="m" />
         </Field>
       </div>
 
-      <Field
-        label="Relais au maximum dans la chaine"
-        hint="Si un seul relais ne suffit pas, l application en insere d autres dans le bond le plus faible, jusqu a ce que l objectif de marge soit tenu ou que ce plafond soit atteint."
-      >
+      <Field label={t('search.maxRelays')} hint={t('search.maxRelaysHint')}>
         <NumberInput
           value={search.maxRelays}
           onChange={(v) => set({ maxRelays: Math.round(v) })}
@@ -101,10 +99,7 @@ export default function SearchPanel({ search, onChange, provider, onProviderChan
         />
       </Field>
 
-      <Field
-        label="Modele numerique de terrain"
-        hint={p.hint}
-      >
+      <Field label={t('search.dem')} hint={p.hint}>
         <Select
           value={provider}
           onChange={onProviderChange}
@@ -114,50 +109,40 @@ export default function SearchPanel({ search, onChange, provider, onProviderChan
 
       {p.needsSelfHost && (
         <div className="space-y-2">
-          <Banner tone="warn" title="Instance auto-hebergee requise">
-            L API publique d OpenTopoData ne renvoie aucun en-tete CORS : le navigateur bloque l appel.
-            Indiquez l adresse de votre propre instance, sinon l application basculera automatiquement sur
-            un fournisseur mondial.
+          <Banner tone="warn" title={t('search.selfHostTitle')}>
+            {t('search.selfHostMsg')}
           </Banner>
-          <Field label="Adresse de l instance OpenTopoData">
+          <Field label={t('search.otdAddress')}>
             <TextInput
               value={otdBase}
               onChange={(v) => {
                 setOtdBase(v);
                 setOpenTopoDataBase(v.trim());
               }}
-              placeholder="https://mon-serveur.exemple/"
+              placeholder="https://mon-serveur.example/"
             />
           </Field>
         </div>
       )}
 
-      {tooFine && (
-        <Banner tone="warn">
-          Un pas de {search.step} m est plus fin que la resolution du MNT ({p.resolution} m) : les points
-          supplementaires n apportent pas d information, ils ne font qu allonger le telechargement.
-        </Banner>
-      )}
+      {tooFine && <Banner tone="warn">{t('search.tooFine', { step: search.step, res: p.resolution })}</Banner>}
 
       <div className="space-y-2 rounded-lg border border-ink-500/60 bg-ink-900/40 p-2.5">
         <Checkbox
           checked={search.clutter}
           onChange={(v) => set({ clutter: v })}
-          label="Modeliser la couverture du sol"
-          hint="Vegetation et bati depuis OpenStreetMap. Sans cette option le calcul porte sur le sol nu, ce qui surestime nettement la portee : un rideau de feuillus coute 10 a 20 dB a 868 MHz."
+          label={t('search.modelGround')}
+          hint={t('search.modelGroundHint')}
         />
         {search.clutter && (
           <>
             <Checkbox
               checked={search.buildings}
               onChange={(v) => set({ buildings: v })}
-              label="Inclure les batiments"
-              hint="Traites comme obstacles opaques. Volumineux a telecharger, et seuls 8 % portent une hauteur dans OSM : les autres sont estimes a 8 m ou d apres le nombre d etages."
+              label={t('search.includeBuildings')}
+              hint={t('search.includeBuildingsHint')}
             />
-            <p className="text-[11px] leading-snug text-zinc-600">
-              Hauteurs par defaut : foret 20 m, verger 5 m, broussaille 3 m, vigne 2 m. OSM ne
-              renseigne pas la hauteur de la vegetation ; ces valeurs sont des hypotheses.
-            </p>
+            <p className="text-[11px] leading-snug text-zinc-600">{t('search.defaultHeights')}</p>
           </>
         )}
       </div>
@@ -165,31 +150,31 @@ export default function SearchPanel({ search, onChange, provider, onProviderChan
       <Checkbox
         checked={search.exclude}
         onChange={(v) => set({ exclude: v })}
-        label="Exclure les zones inaccessibles"
-        hint="Ecarte les mailles dont la pente depasse 30 deg, ainsi que les surfaces detectees comme etant en eau (plateau parfaitement plat dans le MNT, ou altitude nulle). Detection heuristique : une plaine tres plane peut etre ecartee a tort."
+        label={t('search.excludeInaccessible')}
+        hint={t('search.excludeInaccessibleHint')}
       />
 
       <div className="rounded-lg border border-ink-500/70 bg-ink-900/50 px-2.5 py-2 text-[11px] leading-relaxed">
         <div className="flex items-center justify-between">
-          <span className="text-zinc-500">Distance TX - RX</span>
+          <span className="text-zinc-500">{t('search.linkDistance')}</span>
           <span className="font-mono text-zinc-300">
             {Number.isFinite(linkLength) ? `${(linkLength / 1000).toFixed(2)} km` : '-'}
           </span>
         </div>
         <div className="flex items-center justify-between">
-          <span className="text-zinc-500">Cap TX vers RX</span>
+          <span className="text-zinc-500">{t('search.linkBearing')}</span>
           <span className="font-mono text-zinc-300">{formatBearing(linkBearing)}</span>
         </div>
         <div className="flex items-center justify-between">
-          <span className="text-zinc-500">Points MNT a couvrir</span>
-          <span className="font-mono text-zinc-300">{estimate.points.toLocaleString('fr-FR')}</span>
+          <span className="text-zinc-500">{t('search.pointsToCover')}</span>
+          <span className="font-mono text-zinc-300">{estimate.points.toLocaleString(locale)}</span>
         </div>
         <div className="flex items-center justify-between">
-          <span className="text-zinc-500">Deja en cache</span>
-          <span className="font-mono text-zinc-300">{estimate.cached.toLocaleString('fr-FR')}</span>
+          <span className="text-zinc-500">{t('search.alreadyCached')}</span>
+          <span className="font-mono text-zinc-300">{estimate.cached.toLocaleString(locale)}</span>
         </div>
         <div className="flex items-center justify-between">
-          <span className="text-zinc-500">Requetes reseau</span>
+          <span className="text-zinc-500">{t('search.networkRequests')}</span>
           <span className={`font-mono ${estimate.requests > 200 ? 'text-amber-300' : 'text-zinc-300'}`}>
             {Number.isFinite(estimate.requests) ? estimate.requests : '-'}
             {Number.isFinite(estimate.seconds) ? ` (~${estimate.seconds} s)` : ''}
@@ -197,12 +182,7 @@ export default function SearchPanel({ search, onChange, provider, onProviderChan
         </div>
       </div>
 
-      {estimate.requests > 200 && (
-        <Banner tone="warn" title="Zone tres large">
-          Le telechargement va prendre plusieurs minutes et solliciter lourdement un service gratuit.
-          Reduisez le rayon ou augmentez le pas d echantillonnage.
-        </Banner>
-      )}
+      {estimate.requests > 200 && <Banner tone="warn" title={t('search.wideAreaTitle')}>{t('search.wideAreaMsg')}</Banner>}
     </div>
   );
 }

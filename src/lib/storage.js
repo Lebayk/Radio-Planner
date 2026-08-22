@@ -1,10 +1,18 @@
 // Persistance de la configuration en localStorage.
 
+import { detectLang, tFor } from './strings.js';
+
 const KEY = 'lrp.config.v1';
 
+// Noms de site par defaut, dans la langue detectee au premier chargement :
+// une valeur de champ modifiable par l utilisateur (pas un texte d interface),
+// mais la voir en francais sur une interface passee en anglais se lirait
+// comme un bug.
+const defaultLang = detectLang();
+
 export const DEFAULT_CONFIG = {
-  tx: { name: 'Emetteur', lat: 45.7797, lon: 4.7965, height: 2, gain: 3 },
-  rx: { name: 'Recepteur', lat: 45.8125, lon: 4.8462, height: 2, gain: 3 },
+  tx: { name: tFor(defaultLang, 'export.tx'), lat: 45.7797, lon: 4.7965, height: 2, gain: 3 },
+  rx: { name: tFor(defaultLang, 'export.rx'), lat: 45.8125, lon: 4.8462, height: 2, gain: 3 },
   radio: {
     device: 'custom',
     region: 'EU_868',

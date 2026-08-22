@@ -10,6 +10,7 @@
 
 import { metersPerDeg, haversine } from './geo.js';
 import { marginColor } from './colors.js';
+import { tFor } from './strings.js';
 
 const NICE_STEPS = [50, 100, 200, 250, 500, 1000, 2000, 2500, 5000, 10000, 20000, 25000, 50000];
 
@@ -34,7 +35,7 @@ function niceScale(maxM) {
  * @param {number} o.width  largeur du canvas en pixels
  * @param {number} o.height  hauteur du canvas en pixels
  */
-export function renderCoverageMapPNG({ tx, rx, chain, relay, cover, width = 1400, height = 900 }) {
+export function renderCoverageMapPNG({ tx, rx, chain, relay, cover, width = 1400, height = 900, lang = 'fr' }) {
   const nodes =
     chain?.nodes?.length > 2
       ? chain.nodes
@@ -248,17 +249,17 @@ export function renderCoverageMapPNG({ tx, rx, chain, relay, cover, width = 1400
   ctx.stroke();
   ctx.font = '700 13px Arial, sans-serif';
   ctx.textAlign = 'center';
-  ctx.fillText('N', nx, ny - 24);
+  ctx.fillText(tFor(lang, 'mapRender.north'), nx, ny - 24);
 
   // --- Legende -------------------------------------------------------------
   const legendItems = [];
   if (rings.length) {
-    legendItems.push(['#22c55e', 'Portee fiable', false]);
-    legendItems.push(['#f59e0b', 'Reception limite', true]);
+    legendItems.push(['#22c55e', tFor(lang, 'mapRender.legend.reliable'), false]);
+    legendItems.push(['#f59e0b', tFor(lang, 'mapRender.legend.limited'), true]);
   }
-  if (horizonPts) legendItems.push(['#94a3b8', 'Horizon radio (geometrique)', true]);
-  legendItems.push(['#2563eb', 'TX / RX', false]);
-  if (nodes.some((n) => n.relay)) legendItems.push(['#16a34a', 'Relais', false]);
+  if (horizonPts) legendItems.push(['#94a3b8', tFor(lang, 'mapRender.legend.horizon'), true]);
+  legendItems.push(['#2563eb', tFor(lang, 'mapRender.legend.txRx'), false]);
+  if (nodes.some((n) => n.relay)) legendItems.push(['#16a34a', tFor(lang, 'mapRender.legend.relay'), false]);
 
   const lx = PAD;
   let ly = PAD - 40;

@@ -2,6 +2,8 @@
 // arete (Fresnel-Kirchhoff, ITU-R P.526), avec correction de courbure
 // terrestre k = 4/3.
 
+import { tFor } from './strings.js';
+
 export const C_LIGHT = 299792458;
 
 /** Presets LoRa Meshtastic et sensibilite recepteur associee (dBm). */
@@ -506,37 +508,15 @@ export function combine(hop1, hop2) {
   };
 }
 
+// Niveaux et tonalites : le libelle et le texte affiches sont traduits a la
+// volee dans `assessLink()` via `tFor()`, pas stockes ici en dur - c est ce
+// qui rend le verdict bilingue sans dupliquer cette table.
 export const VERDICTS = {
-  impossible: {
-    level: 'impossible',
-    label: 'Liaison impossible',
-    tone: 'error',
-    short: 'Impossible',
-  },
-  obstrue: {
-    level: 'obstrue',
-    label: 'Sans visibilite directe',
-    tone: 'error',
-    short: 'Obstrue',
-  },
-  limite: {
-    level: 'limite',
-    label: 'Liaison a la limite',
-    tone: 'warn',
-    short: 'Limite',
-  },
-  fragile: {
-    level: 'fragile',
-    label: 'Liaison possible mais fragile',
-    tone: 'warn',
-    short: 'Fragile',
-  },
-  possible: {
-    level: 'possible',
-    label: 'Liaison possible',
-    tone: 'ok',
-    short: 'Possible',
-  },
+  impossible: { level: 'impossible', tone: 'error' },
+  obstrue: { level: 'obstrue', tone: 'error' },
+  limite: { level: 'limite', tone: 'warn' },
+  fragile: { level: 'fragile', tone: 'warn' },
+  possible: { level: 'possible', tone: 'ok' },
 };
 
 /**
@@ -576,6 +556,7 @@ export function assessLink({
   desiredMargin = 10,
   foliage = 0,
   sigma = SIGMA_OPEN,
+  lang = 'fr',
 }) {
   const pct = Number.isFinite(clearance) ? Math.round(clearance * 100) : null;
   // Sans marge statistique fournie, on la reconstruit : les appelants qui ne
@@ -590,40 +571,36 @@ export function assessLink({
   else if (m95 < desiredMargin || clearance < 0.6) v = VERDICTS.fragile;
   else v = VERDICTS.possible;
 
-  const veg =
-    foliage > 0.5 ? ` Dont ${foliage.toFixed(1)} dB attribues a la vegetation traversee.` : '';
+  const veg = foliage > 0.5 ? tFor(lang, 'verdict.reason.foliageSuffix', { db: foliage.toFixed(1) }) : '';
 
   const reason = {
     impossible: !Number.isFinite(margin)
-      ? 'Bilan de liaison indisponible.'
-      : `Le signal arrive ${Math.abs(margin).toFixed(1)} dB sous le seuil de sensibilite du recepteur, ` +
-        'et ce des la valeur mediane. Aucun reglage de puissance realiste ne comblera cet ecart : ' +
-        'il faut surelever les antennes, deplacer un site ou ajouter un relais.' + veg,
+      ? tFor(lang, 'verdict.reason.impossible.noData')
+      : tFor(lang, 'verdict.reason.impossible', { gap: Math.abs(margin).toFixed(1) }) + veg,
     obstrue:
-      `Le relief coupe la ligne de visee et la depasse de ${Math.abs(pct / 100).toFixed(1)} fois le rayon ` +
-      'de Fresnel. Le signal ne passe plus que par diffraction, mecanisme dont l estimation reste ' +
-      `incertaine sur un relief massif : la marge de ${margin.toFixed(1)} dB affichee est a prendre ` +
-      'avec precaution.' + veg,
+      tFor(lang, 'verdict.reason.obstrue', {
+        ratio: Math.abs(pct / 100).toFixed(1),
+        margin: margin.toFixed(1),
+      }) + veg,
     limite:
-      `La liaison passe au niveau median (${margin.toFixed(1)} dB) mais pas de facon fiable : ` +
-      `sur 95 % des emplacements il ne resterait que ${m95.toFixed(1)} dB. ` +
-      'Autrement dit, elle tiendra certains jours et pas d autres.' + veg,
+      tFor(lang, 'verdict.reason.limite', { margin: margin.toFixed(1), m95: m95.toFixed(1) }) + veg,
     fragile:
       (m95 < desiredMargin
-        ? `Marge fiable de ${m95.toFixed(1)} dB, en dessous de l objectif de ${desiredMargin} dB.`
-        : `Marge fiable de ${m95.toFixed(1)} dB, mais ` +
-          (pct < 0
-            ? 'le relief affleure la ligne de visee'
-            : `seulement ${pct} % de la premiere zone de Fresnel est degagee la ou il en faudrait 60 %`) +
-          '.') +
-      ' Le resultat ne laisse pas de reserve pour ce que le modele ignore.' + veg,
+        ? tFor(lang, 'verdict.reason.fragile.belowTarget', { m95: m95.toFixed(1), target: desiredMargin })
+        : (pct < 0
+            ? tFor(lang, 'verdict.reason.fragile.grazing', { m95: m95.toFixed(1) })
+            : tFor(lang, 'verdict.reason.fragile.clearance', { m95: m95.toFixed(1), pct })
+          )) +
+      tFor(lang, 'verdict.reason.fragile.suffix') +
+      veg,
     possible:
-      `Marge de ${margin.toFixed(1)} dB en median, ${m95.toFixed(1)} dB tenus sur 95 % des ` +
-      `emplacements, et ${pct} % de la zone de Fresnel degagee.` + veg,
+      tFor(lang, 'verdict.reason.possible', { margin: margin.toFixed(1), m95: m95.toFixed(1), pct }) + veg,
   }[v.level];
 
   return {
     ...v,
+    label: tFor(lang, `verdict.${v.level}.label`),
+    short: tFor(lang, `verdict.${v.level}.short`),
     margin,
     margin50: margin,
     margin95: m95,

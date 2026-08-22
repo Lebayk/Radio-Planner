@@ -1,5 +1,6 @@
 import React, { useEffect, useId, useLayoutEffect, useRef, useState } from 'react';
 import { createPortal } from 'react-dom';
+import { useI18n } from '../lib/i18n.js';
 
 /**
  * Menu deroulant rendu dans un portail, en position fixe.
@@ -218,6 +219,7 @@ export function MarginChip({ value, unit = 'dB', digits = 1 }) {
 }
 
 export function Banner({ tone = 'info', title, children, onClose }) {
+  const { t } = useI18n();
   const tones = {
     info: 'border-sky-500/30 bg-sky-500/10 text-sky-200',
     warn: 'border-amber-500/30 bg-amber-500/10 text-amber-200',
@@ -236,7 +238,7 @@ export function Banner({ tone = 'info', title, children, onClose }) {
             type="button"
             onClick={onClose}
             className="shrink-0 rounded p-0.5 opacity-60 transition hover:opacity-100"
-            aria-label="Fermer"
+            aria-label={t('ui.close')}
           >
             <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.5">
               <path d="M6 6l12 12M18 6L6 18" strokeLinecap="round" />

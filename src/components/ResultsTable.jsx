@@ -2,12 +2,7 @@ import React, { useState } from 'react';
 import { MarginChip, Spinner } from './ui.jsx';
 import Verdict from './Verdict.jsx';
 import { assessLink } from '../lib/radio.js';
-
-const fmtRoad = (r) => {
-  if (r === undefined) return '...';
-  if (r === null) return '-';
-  return r.dist < 1000 ? `${Math.round(r.dist)} m` : `${(r.dist / 1000).toFixed(1)} km`;
-};
+import { useI18n } from '../lib/i18n.js';
 
 const clearanceCell = (c) => {
   const pct = c * 100;
@@ -16,9 +11,16 @@ const clearanceCell = (c) => {
 };
 
 export default function ResultsTable({ rows, roads, roadsBusy, selectedIndex, onSelect, onLocate, desiredMargin }) {
+  const { t, lang } = useI18n();
   const [expanded, setExpanded] = useState(false);
   if (!rows?.length) return null;
   const shown = expanded ? rows.slice(0, 25) : rows.slice(0, 5);
+
+  const fmtRoad = (r) => {
+    if (r === undefined) return '...';
+    if (r === null) return '-';
+    return r.dist < 1000 ? `${Math.round(r.dist)} m` : `${(r.dist / 1000).toFixed(1)} km`;
+  };
 
   return (
     <div>
@@ -26,16 +28,16 @@ export default function ResultsTable({ rows, roads, roadsBusy, selectedIndex, on
         <table className="w-full min-w-[720px] border-collapse text-[12px]">
           <thead>
             <tr className="text-left text-[10px] uppercase tracking-wide text-zinc-500">
-              <th className="px-1.5 py-2 font-medium">#</th>
-              <th className="px-1.5 py-2 font-medium">Verdict</th>
-              <th className="px-1.5 py-2 font-medium">Coordonnees</th>
-              <th className="px-1.5 py-2 text-right font-medium">Alt.</th>
-              <th className="px-1.5 py-2 text-right font-medium">Mat</th>
-              <th className="px-1.5 py-2 text-right font-medium">Bond 1</th>
-              <th className="px-1.5 py-2 text-right font-medium">Bond 2</th>
-              <th className="px-1.5 py-2 text-right font-medium">Globale</th>
-              <th className="px-1.5 py-2 text-right font-medium">Fresnel</th>
-              <th className="px-1.5 py-2 text-right font-medium">Route</th>
+              <th className="px-1.5 py-2 font-medium">{t('results.col.n')}</th>
+              <th className="px-1.5 py-2 font-medium">{t('results.col.verdict')}</th>
+              <th className="px-1.5 py-2 font-medium">{t('results.col.coords')}</th>
+              <th className="px-1.5 py-2 text-right font-medium">{t('results.col.alt')}</th>
+              <th className="px-1.5 py-2 text-right font-medium">{t('results.col.mast')}</th>
+              <th className="px-1.5 py-2 text-right font-medium">{t('results.col.hop1')}</th>
+              <th className="px-1.5 py-2 text-right font-medium">{t('results.col.hop2')}</th>
+              <th className="px-1.5 py-2 text-right font-medium">{t('results.col.overall')}</th>
+              <th className="px-1.5 py-2 text-right font-medium">{t('results.col.fresnel')}</th>
+              <th className="px-1.5 py-2 text-right font-medium">{t('results.col.road')}</th>
             </tr>
           </thead>
           <tbody>
@@ -51,12 +53,15 @@ export default function ResultsTable({ rows, roads, roadsBusy, selectedIndex, on
                 clearance: Math.min(r.best.c1, r.best.c2),
                 desiredMargin,
                 foliage: r.best.foliage,
+                lang,
               });
-              const title =
-                `Score de classement : ${r.best.score.toFixed(1)} dB` +
-                (penalty > 0.05
-                  ? ` (marge ${r.best.margin.toFixed(1)} dB moins ${penalty.toFixed(1)} dB de penalite de degagement)`
-                  : ' (aucune penalite de degagement)');
+              const title = t('results.rowTitle', {
+                score: r.best.score.toFixed(1),
+                penalty:
+                  penalty > 0.05
+                    ? t('results.rowTitle.penalty', { margin: r.best.margin.toFixed(1), penalty: penalty.toFixed(1) })
+                    : t('results.rowTitle.noPenalty'),
+              });
               return (
                 <tr
                   key={`${r.lat}-${r.lon}`}
@@ -86,7 +91,7 @@ export default function ResultsTable({ rows, roads, roadsBusy, selectedIndex, on
                         e.stopPropagation();
                         onLocate(r);
                       }}
-                      title="Centrer la carte"
+                      title={t('results.centerMap')}
                     >
                       {r.lat.toFixed(5)}, {r.lon.toFixed(5)}
                     </button>
@@ -118,14 +123,10 @@ export default function ResultsTable({ rows, roads, roadsBusy, selectedIndex, on
       </div>
 
       <div className="mt-2 flex items-center justify-between text-[11px] text-zinc-500">
-        <span>
-          Marge globale = min(bond 1, bond 2). Fresnel = degagement minimal des deux bonds. Le classement
-          se fait sur la marge <em>penalisee</em> : en dessous de 60 % de degagement, jusqu a 6 dB sont
-          retranches au bond concerne. Survolez une ligne pour voir le detail du score.
-        </span>
+        <span>{t('results.footer')}</span>
         {rows.length > 5 && (
           <button type="button" className="shrink-0 text-sky-400 hover:text-sky-300" onClick={() => setExpanded((v) => !v)}>
-            {expanded ? 'Voir moins' : `Voir ${Math.min(25, rows.length)} sites`}
+            {expanded ? t('results.seeLess') : t('results.seeMore', { n: Math.min(25, rows.length) })}
           </button>
         )}
       </div>

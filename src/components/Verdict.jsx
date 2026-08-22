@@ -1,4 +1,5 @@
 import React from 'react';
+import { useI18n } from '../lib/i18n.js';
 
 const TONES = {
   ok: {
@@ -26,6 +27,7 @@ const TONES = {
  * vraiment : est-ce que ca passe, oui ou non.
  */
 export default function Verdict({ verdict, compact = false }) {
+  const { t: translate } = useI18n();
   if (!verdict) return null;
   const t = TONES[verdict.tone] ?? TONES.warn;
 
@@ -67,14 +69,14 @@ export default function Verdict({ verdict, compact = false }) {
           {Number.isFinite(verdict.margin95) && (
             <p className="mt-1.5 flex flex-wrap items-baseline gap-x-4 gap-y-0.5 border-t border-white/10 pt-1.5 text-[11px] leading-relaxed text-zinc-400">
               <span>
-                Median{' '}
+                {translate('verdict.median')}{' '}
                 <span className="font-mono text-zinc-300">
                   {verdict.margin50 > 0 ? '+' : ''}
                   {verdict.margin50.toFixed(1)} dB
                 </span>
               </span>
               <span>
-                Tenu sur 95 % des emplacements{' '}
+                {translate('verdict.held95')}{' '}
                 <span
                   className={`font-mono ${
                     verdict.margin95 >= 0 ? 'text-emerald-300' : 'text-rose-300'
@@ -85,7 +87,7 @@ export default function Verdict({ verdict, compact = false }) {
                 </span>
               </span>
               <span className="text-zinc-500">
-                dispersion <span className="font-mono">{verdict.sigma?.toFixed(1)} dB</span>
+                {translate('verdict.dispersion')} <span className="font-mono">{verdict.sigma?.toFixed(1)} dB</span>
               </span>
             </p>
           )}

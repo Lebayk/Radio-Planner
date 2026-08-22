@@ -2,26 +2,27 @@ import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import L from 'leaflet';
 import { marginColor, heatRgb } from '../lib/colors.js';
 import { destination, bearing, formatBearing } from '../lib/geo.js';
+import { useI18n } from '../lib/i18n.js';
 
-const BASE_LAYERS = () => ({
-  'Relief (OpenTopoMap)': L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
+const BASE_LAYERS = (t) => ({
+  [t('map.baseLayer.relief')]: L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
     maxZoom: 17,
     attribution:
       'Fond <a href="https://opentopomap.org">OpenTopoMap</a> (CC-BY-SA) - donnees <a href="https://openstreetmap.org">OpenStreetMap</a>',
   }),
-  'Plan IGN': L.tileLayer(
+  [t('map.baseLayer.ignPlan')]: L.tileLayer(
     'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0' +
       '&LAYER=GEOGRAPHICALGRIDSYSTEMS.PLANIGNV2&STYLE=normal&TILEMATRIXSET=PM' +
       '&FORMAT=image/png&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}',
     { maxZoom: 19, attribution: 'Fond <a href="https://geoservices.ign.fr/">IGN</a> - Geoplateforme' }
   ),
-  'Photo aerienne IGN': L.tileLayer(
+  [t('map.baseLayer.ignAerial')]: L.tileLayer(
     'https://data.geopf.fr/wmts?SERVICE=WMTS&REQUEST=GetTile&VERSION=1.0.0' +
       '&LAYER=ORTHOIMAGERY.ORTHOPHOTOS&STYLE=normal&TILEMATRIXSET=PM' +
       '&FORMAT=image/jpeg&TILEMATRIX={z}&TILEROW={y}&TILECOL={x}',
     { maxZoom: 19, attribution: 'Fond <a href="https://geoservices.ign.fr/">IGN</a> - Geoplateforme' }
   ),
-  'OpenStreetMap': L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
+  [t('map.baseLayer.osm')]: L.tileLayer('https://tile.openstreetmap.org/{z}/{x}/{y}.png', {
     maxZoom: 19,
     attribution: 'Donnees <a href="https://openstreetmap.org">OpenStreetMap</a>',
   }),
@@ -105,11 +106,18 @@ export default function MapView({
   onCandidateClick,
   focus,
 }) {
+  const { t } = useI18n();
   const hostRef = useRef(null);
   const mapRef = useRef(null);
   const layersRef = useRef({});
   const cbRef = useRef({});
   cbRef.current = { onMapClick, onSiteDrag, onCandidateClick };
+  // Traductions lues dans les effets Leaflet (hors JSX) : capturees dans un
+  // ref pour que les effets qui ne dependent pas de la langue n aient pas a
+  // la lister dans leurs dependances, sans pour autant figer une traduction
+  // perimee au premier rendu.
+  const tRef = useRef(t);
+  tRef.current = t;
 
   // --- Initialisation ------------------------------------------------------
   useEffect(() => {
@@ -124,7 +132,7 @@ export default function MapView({
       preferCanvas: false,
     }).setView([tx.lat, tx.lon], 13);
 
-    const bases = BASE_LAYERS();
+    const bases = BASE_LAYERS(tRef.current);
     Object.values(bases)[0].addTo(map);
     L.control.layers(bases, {}, { position: 'topright', collapsed: true }).addTo(map);
     L.control.scale({ imperial: false, position: 'bottomleft' }).addTo(map);
@@ -200,20 +208,24 @@ export default function MapView({
     const sameSpot =
       relay && chainDrawn && Math.abs(relay.lat - chain.nodes[1].lat) < 1e-6 && Math.abs(relay.lon - chain.nodes[1].lon) < 1e-6;
 
-    const capLine = (label, origin, target) =>
-      target ? `<br>cap ${label}${formatBearing(bearing(origin, target))}` : '';
+    const capLine = (labelKey, origin, target) =>
+      target ? `<br>${t('map.tooltip.cap')}${labelKey ? t(labelKey) : ''}${formatBearing(bearing(origin, target))}` : '';
 
     const txCaps =
       relay && chainDrawn && !sameSpot
-        ? capLine('chaine ', tx, chain.nodes[1]) + capLine('candidat ', tx, relay)
-        : capLine('', tx, chainDrawn ? chain.nodes[1] : relay || rx);
+        ? capLine('map.tooltip.capChain', tx, chain.nodes[1]) + capLine('map.tooltip.capCandidate', tx, relay)
+        : capLine(null, tx, chainDrawn ? chain.nodes[1] : relay || rx);
     const rxCaps =
       relay && chainDrawn && !sameSpot
-        ? capLine('chaine ', rx, chain.nodes[chain.nodes.length - 2]) + capLine('candidat ', rx, relay)
-        : capLine('', rx, chainDrawn ? chain.nodes[chain.nodes.length - 2] : relay || tx);
+        ? capLine('map.tooltip.capChain', rx, chain.nodes[chain.nodes.length - 2]) + capLine('map.tooltip.capCandidate', rx, relay)
+        : capLine(null, rx, chainDrawn ? chain.nodes[chain.nodes.length - 2] : relay || tx);
 
-    mk(tx, 'tx', 'TX').bindTooltip(`${tx.name} (TX)${txCaps}`, { direction: 'top', offset: [0, -14] }).addTo(markers);
-    mk(rx, 'rx', 'RX').bindTooltip(`${rx.name} (RX)${rxCaps}`, { direction: 'top', offset: [0, -14] }).addTo(markers);
+    mk(tx, 'tx', 'TX')
+      .bindTooltip(`${t('map.tooltip.txName', { name: tx.name })}${txCaps}`, { direction: 'top', offset: [0, -14] })
+      .addTo(markers);
+    mk(rx, 'rx', 'RX')
+      .bindTooltip(`${t('map.tooltip.rxName', { name: rx.name })}${rxCaps}`, { direction: 'top', offset: [0, -14] })
+      .addTo(markers);
 
     if (relay) {
       // Ambre et distinct du vert de la chaine des que les deux coexistent,
@@ -221,9 +233,10 @@ export default function MapView({
       const kind = chainDrawn ? 'candidate' : 'relay';
       const m = mk(relay, kind, chainDrawn ? 'C' : 'REL');
       m.bindTooltip(
-        `${chainDrawn ? 'Candidat inspecte (hors chaine)' : 'Relais'} - antenne ${relay.height} m` +
-          `<br>marge ${relay.margin?.toFixed(1) ?? '-'} dB` +
-          `<br>cap vers TX ${formatBearing(bearing(relay, tx))} · cap vers RX ${formatBearing(bearing(relay, rx))}`,
+        `${chainDrawn ? t('map.tooltip.candidateInspected') : t('map.tooltip.relay')}` +
+          t('map.tooltip.antenna', { h: relay.height }) +
+          `<br>${t('map.tooltip.margin', { m: relay.margin?.toFixed(1) ?? '-' })}` +
+          `<br>${t('map.tooltip.capToTx', { c: formatBearing(bearing(relay, tx)) })} · ${t('map.tooltip.capToRx', { c: formatBearing(bearing(relay, rx)) })}`,
         { direction: 'top', offset: [0, -16] }
       ).addTo(markers);
 
@@ -235,7 +248,7 @@ export default function MapView({
 
     if (manual) {
       mk(manual, 'manual', 'PT')
-        .bindTooltip('Point force', { direction: 'top', offset: [0, -14] })
+        .bindTooltip(t('map.tooltip.forcedPoint'), { direction: 'top', offset: [0, -14] })
         .addTo(markers);
     }
 
@@ -246,7 +259,7 @@ export default function MapView({
       opacity: 0.65,
       dashArray: '5 6',
     }).addTo(links);
-  }, [tx, rx, relay, manual, chain]);
+  }, [tx, rx, relay, manual, chain, t]);
 
   // --- Chaine de relais -----------------------------------------------------
   useEffect(() => {
@@ -266,9 +279,9 @@ export default function MapView({
         { color: marginColor(hop?.margin95), weight: 4, opacity: 0.95 }
       )
         .bindTooltip(
-          `Bond ${i + 1} : ${(hop?.distM / 1000).toFixed(2)} km<br>` +
-            `cap ${formatBearing(bearing(nodes[i], nodes[i + 1]))}<br>` +
-            `marge 95 % ${hop?.margin95?.toFixed(1) ?? '-'} dB`,
+          `${t('map.tooltip.hopN', { n: i + 1, km: (hop?.distM / 1000).toFixed(2) })}<br>` +
+            `${t('map.tooltip.cap')}${formatBearing(bearing(nodes[i], nodes[i + 1]))}<br>` +
+            t('map.tooltip.margin95', { m: hop?.margin95?.toFixed(1) ?? '-' }),
           { sticky: true }
         )
         .addTo(st.groups.chain);
@@ -281,13 +294,13 @@ export default function MapView({
         zIndexOffset: 600,
       })
         .bindTooltip(
-          `Relais R${i} - antenne ${n.height} m<br>sol ${n.elev?.toFixed(0)} m<br>` +
-            `cap ← ${formatBearing(bearing(n, nodes[i - 1]))} · cap → ${formatBearing(bearing(n, nodes[i + 1]))}`,
+          `${t('map.tooltip.relayN', { n: i, h: n.height })}<br>${t('map.tooltip.ground', { e: n.elev?.toFixed(0) })}<br>` +
+            `${t('map.tooltip.cap')}← ${formatBearing(bearing(n, nodes[i - 1]))} · ${t('map.tooltip.cap')}→ ${formatBearing(bearing(n, nodes[i + 1]))}`,
           { direction: 'top', offset: [0, -16] }
         )
         .addTo(st.groups.chain);
     });
-  }, [chain]);
+  }, [chain, t]);
 
   // --- Corridor de recherche ------------------------------------------------
   useEffect(() => {
@@ -378,9 +391,9 @@ export default function MapView({
         fillOpacity: isTop ? 1 : 0.75,
       });
       m.bindTooltip(
-        `<b>#${i + 1}</b> - marge ${c.best.margin.toFixed(1)} dB<br>` +
-          `antenne ${c.best.h} m - alt. ${c.elev.toFixed(0)} m<br>` +
-          `bond 1 ${c.best.m1.toFixed(1)} dB / bond 2 ${c.best.m2.toFixed(1)} dB`,
+        `<b>${t('map.tooltip.candidateHeader', { n: i + 1, m: c.best.margin.toFixed(1) })}</b><br>` +
+          `${t('map.tooltip.candidateAntenna', { h: c.best.h, e: c.elev.toFixed(0) })}<br>` +
+          t('map.tooltip.candidateHops', { m1: c.best.m1.toFixed(1), m2: c.best.m2.toFixed(1) }),
         { direction: 'top', offset: [0, -6] }
       );
       m.on('click', (e) => {
@@ -389,7 +402,7 @@ export default function MapView({
       });
       m.addTo(st.groups.candidates);
     });
-  }, [candidates, showCandidates]);
+  }, [candidates, showCandidates, t]);
 
   /**
    * Bornes de tout ce qui constitue la liaison.
@@ -431,13 +444,13 @@ export default function MapView({
 
   const legend = useMemo(
     () => [
-      { c: '#22c55e', t: 'marge > 15 dB' },
-      { c: '#f59e0b', t: '5 a 15 dB' },
-      { c: '#ef4444', t: '< 5 dB' },
-      { c: '#22c55e', t: 'portee fiable', ring: true },
-      { c: '#f59e0b', t: 'reception limite', ring: true },
+      { c: '#22c55e', t: t('map.legend.high') },
+      { c: '#f59e0b', t: t('map.legend.mid') },
+      { c: '#ef4444', t: t('map.legend.low') },
+      { c: '#22c55e', t: t('map.legend.reliable'), ring: true },
+      { c: '#f59e0b', t: t('map.legend.limited'), ring: true },
     ],
-    []
+    [t]
   );
 
   return (
@@ -445,9 +458,9 @@ export default function MapView({
       <div ref={hostRef} className="h-full w-full" />
 
       <div className="pointer-events-none absolute bottom-6 right-3 z-[500] rounded-lg border border-ink-500/80 bg-ink-900/85 px-2.5 py-2 text-[10px] backdrop-blur">
-        <div className="mb-1 font-semibold uppercase tracking-wide text-zinc-500">Qualite</div>
-        {legend.map((l) => (
-          <div key={l.t} className="flex items-center gap-1.5 leading-relaxed text-zinc-400">
+        <div className="mb-1 font-semibold uppercase tracking-wide text-zinc-500">{t('map.quality')}</div>
+        {legend.map((l, i) => (
+          <div key={i} className="flex items-center gap-1.5 leading-relaxed text-zinc-400">
             <span
               className="h-2 w-2 rounded-full"
               style={
@@ -474,13 +487,13 @@ export default function MapView({
             ? 'border-sky-400 bg-sky-600 text-white'
             : 'border-ink-500 bg-ink-800/90 text-zinc-300 hover:bg-ink-600 hover:text-zinc-100'
         }`}
-        title="Definir l emetteur puis le recepteur par deux clics sur la carte"
+        title={t('map.placeBothTitle')}
       >
         <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.2">
           <path d="M12 21s7-6.2 7-11a7 7 0 1 0-14 0c0 4.8 7 11 7 11z" strokeLinejoin="round" />
           <circle cx="12" cy="10" r="2.4" />
         </svg>
-        {pickMode === 'both' ? 'Annuler' : 'Placer TX + RX'}
+        {pickMode === 'both' ? t('map.cancel') : t('map.placeBoth')}
       </button>
 
       {/* Recadrage : filet de securite permanent. Une chaine de relais peut
@@ -490,12 +503,12 @@ export default function MapView({
         type="button"
         onClick={recenter}
         className="flex items-center gap-1.5 rounded-md border border-ink-500 bg-ink-800/90 px-2 py-1.5 text-[11px] font-medium text-zinc-300 shadow-lg backdrop-blur transition hover:bg-ink-600 hover:text-zinc-100"
-        title="Recadrer sur toute la liaison, relais compris"
+        title={t('map.recenterTitle')}
       >
         <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.2">
           <path d="M4 9V5a1 1 0 0 1 1-1h4M20 9V5a1 1 0 0 0-1-1h-4M4 15v4a1 1 0 0 0 1 1h4M20 15v4a1 1 0 0 1-1 1h-4" strokeLinecap="round" />
         </svg>
-        Recadrer
+        {t('map.recenter')}
       </button>
 
       {/* Portee du relais : le calcul telecharge son propre relief, il reste
@@ -511,11 +524,7 @@ export default function MapView({
                 ? 'border-emerald-400 bg-emerald-600 text-white'
                 : 'border-ink-500 bg-ink-800/90 text-zinc-300 hover:bg-ink-600 hover:text-zinc-100'
             }`}
-            title={
-              coverage
-                ? 'Afficher ou masquer l enveloppe de portee'
-                : 'Calculer la portee du relais sur le relief reel'
-            }
+            title={coverage ? t('map.toggleCoverageTitle') : t('map.runCoverageTitle')}
           >
             <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2">
               <circle cx="12" cy="12" r="2.5" />
@@ -523,20 +532,18 @@ export default function MapView({
             </svg>
             {coverageBusy
               ? coverageProgress
-                ? `Portee ${coverageProgress.done}/${coverageProgress.total}`
-                : 'Calcul...'
+                ? t('map.coverageProgress', { done: coverageProgress.done, total: coverageProgress.total })
+                : t('map.calculating')
               : coverage
                 ? showCoverage
-                  ? 'Portee affichee'
-                  : 'Portee masquee'
-                : 'Calculer la portee'}
+                  ? t('map.coverageShown')
+                  : t('map.coverageHidden')
+                : t('map.calculateCoverage')}
           </button>
 
           {!coverage && !coverageBusy && (
             <span className="max-w-[190px] rounded bg-ink-900/85 px-1.5 py-1 text-[10px] leading-snug text-zinc-500 backdrop-blur">
-              {coverageStale
-                ? 'Les parametres ont change : relancez le calcul.'
-                : 'Necessite un telechargement de relief autour du relais.'}
+              {coverageStale ? t('map.staleParams') : t('map.needsDownload')}
             </span>
           )}
         </div>
@@ -548,17 +555,15 @@ export default function MapView({
         <div className="pointer-events-none absolute left-1/2 top-3 z-[1001] -translate-x-1/2 rounded-full border border-sky-500/50 bg-sky-500/20 px-3 py-1.5 text-[11px] font-medium text-sky-100 shadow-lg backdrop-blur">
           {pickMode === 'both' && (
             <>
-              {pickStep === 0
-                ? 'Cliquez pour placer l emetteur (1 sur 2)'
-                : 'Cliquez pour placer le recepteur (2 sur 2)'}
-              <span className="ml-2 text-sky-300/70">Echap pour annuler</span>
+              {pickStep === 0 ? t('map.pick.tx1of2') : t('map.pick.rx2of2')}
+              <span className="ml-2 text-sky-300/70">{t('map.pick.escape')}</span>
             </>
           )}
-          {pickMode === 'manual' && 'Cliquez pour evaluer un emplacement precis'}
+          {pickMode === 'manual' && t('map.pick.manual')}
           {(pickMode === 'tx' || pickMode === 'rx') && (
             <>
-              Cliquez pour placer {pickMode === 'tx' ? 'l emetteur' : 'le recepteur'}
-              <span className="ml-2 text-sky-300/70">Echap pour annuler</span>
+              {pickMode === 'tx' ? t('map.pick.tx') : t('map.pick.rx')}
+              <span className="ml-2 text-sky-300/70">{t('map.pick.escape')}</span>
             </>
           )}
         </div>

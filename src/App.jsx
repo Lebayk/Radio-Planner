@@ -23,6 +23,7 @@ import { fetchClutter, estimateClutter, gridBbox, clutterSummary } from './lib/c
 import { loadRoads, nearestRoad, bboxAround, clearRoadCache } from './lib/osm.js';
 import { exportGpx, exportKml, exportPdf, preloadPdf } from './lib/exporters.js';
 import { renderCoverageMapPNG } from './lib/mapRender.js';
+import { useI18n } from './lib/i18n.js';
 import {
   buildRays,
   computeCoverage,
@@ -39,6 +40,7 @@ const signature = (c) =>
   JSON.stringify([c.tx.lat, c.tx.lon, c.tx.height, c.tx.gain, c.rx.lat, c.rx.lon, c.rx.height, c.rx.gain, c.radio, c.search, c.provider]);
 
 export default function App() {
+  const { t, lang, setLang, locale } = useI18n();
   const [config, setConfig] = useState(loadConfig);
   const [elev, setElev] = useState({ tx: NaN, rx: NaN });
   const [elevBusy, setElevBusy] = useState(false);
@@ -182,7 +184,7 @@ export default function App() {
         ]);
         if (!cancelled) setElev({ tx: values[0], rx: values[1] });
       } catch (e) {
-        if (!cancelled) setWarnings((w) => [...new Set([...w, `Altitudes TX/RX indisponibles : ${e.message}`])]);
+        if (!cancelled) setWarnings((w) => [...new Set([...w, `warn:elevUnavailable:${e.message}`])]);
       } finally {
         if (!cancelled) setElevBusy(false);
       }
@@ -220,15 +222,15 @@ export default function App() {
 
   const runScan = useCallback(async () => {
     if (!search.heights.length) {
-      setError('Selectionnez au moins une hauteur d antenne pour le relais.');
+      setError(t('app.error.needHeight'));
       return;
     }
     if (estimate.tooBig) {
-      setError('Zone trop vaste pour le pas demande. Augmentez le pas ou reduisez le rayon.');
+      setError(t('app.error.tooBig'));
       return;
     }
     if (linkLength < 200) {
-      setError('TX et RX sont trop proches (moins de 200 m) : un relais n a pas de sens ici.');
+      setError(t('app.error.tooClose'));
       return;
     }
 
@@ -247,7 +249,7 @@ export default function App() {
       const mask = estimate.mask ?? buildMask(grid, tx, rx);
       const pts = estimate.pts ?? maskedPoints(grid, mask);
 
-      setProgress({ label: 'Telechargement du relief', value: 0, total: Math.max(1, estimate.requests) });
+      setProgress({ label: t('app.progress.elevation'), value: 0, total: Math.max(1, estimate.requests) });
 
       const { values, warnings: w1 } = await fetchElevations(provider, pts, {
         signal: ctl.signal,
@@ -255,8 +257,8 @@ export default function App() {
           setProgress({
             label:
               total === 0
-                ? `Relief deja en cache (${cached.toLocaleString('fr-FR')} points)`
-                : `Telechargement du relief - ${done}/${total} requetes`,
+                ? t('app.progress.elevationCached', { n: cached.toLocaleString(locale) })
+                : t('app.progress.elevationDl', { done, total }),
             value: total === 0 ? 1 : done,
             total: total === 0 ? 1 : total,
           }),
@@ -280,7 +282,7 @@ export default function App() {
       setElev({ tx: txElev, rx: rxElev });
 
       if (!Number.isFinite(txElev) || !Number.isFinite(rxElev)) {
-        throw new Error('Altitude indisponible pour TX ou RX. Le MNT choisi ne couvre probablement pas la zone.');
+        throw new Error(t('app.warn.elevMissing'));
       }
 
       // --- Couverture du sol -------------------------------------------
@@ -290,7 +292,7 @@ export default function App() {
       if (search.clutter) {
         setPhase('clutter');
         const est = estimateClutter(gridBbox(grid), search.buildings ? gridBbox(grid) : null);
-        setProgress({ label: 'Couverture du sol', value: 0, total: Math.max(1, est.tiles) });
+        setProgress({ label: t('app.progress.clutter'), value: 0, total: Math.max(1, est.tiles) });
         try {
           clutter = await fetchClutter({
             grid,
@@ -299,40 +301,33 @@ export default function App() {
             onProgress: ({ done, total, layer, waitingMs }) =>
               setProgress({
                 label: waitingMs
-                  ? `Couverture du sol - quota Overpass atteint, reprise dans ${Math.round(waitingMs / 1000)} s`
+                  ? t('app.progress.clutterQuota', { s: Math.round(waitingMs / 1000) })
                   : layer === 'cache'
-                    ? 'Couverture du sol deja en cache'
-                    : `Couverture du sol - ${layer} ${done}/${total}`,
+                    ? t('app.progress.clutterCached')
+                    : t('app.progress.clutterLayer', { layer, done, total }),
                 value: done,
                 total,
               }),
           });
           if (clutter.stats?.unavailable) {
-            setWarnings((w) => [
-              ...w,
-              'Aucune instance OpenStreetMap Overpass joignable : la vegetation et le bati ne ' +
-                'sont pas pris en compte, et la portee est donc surestimee. Le relief, lui, ' +
-                'reste exact. Reessayez dans quelques minutes.',
-            ]);
+            setWarnings((w) => [...w, t('app.warn.overpassUnavailable')]);
           } else if (clutter.stats?.failed) {
             setWarnings((w) => [
               ...w,
-              `${clutter.stats.failed} tuile(s) de couverture du sol sur ${clutter.stats.tiles} ` +
-                `sont restees inaccessibles (quota Overpass) : le couvert y est ignore, ` +
-                `donc surestime localement. Relancez plus tard pour les completer.`,
+              t('app.warn.overpassPartial', { failed: clutter.stats.failed, total: clutter.stats.tiles }),
             ]);
           }
         } catch (e) {
           if (e.name === 'AbortError') throw e;
           // Le clutter est un raffinement : son echec ne doit pas emporter le
           // balayage, qui reste valable sur sol nu.
-          setWarnings((w) => [...w, `Couverture du sol indisponible : ${e.message}. Calcul sur sol nu.`]);
+          setWarnings((w) => [...w, t('app.warn.clutterFailed', { msg: e.message })]);
         }
       }
 
       if (w1.length) setWarnings((w) => [...new Set([...w, ...w1])]);
       setPhase('scan');
-      setProgress({ label: 'Analyse des emplacements candidats', value: 0, total: 1 });
+      setProgress({ label: t('app.progress.candidates'), value: 0, total: 1 });
 
       workerRef.current?.terminate();
       const worker = new Worker(new URL('./workers/scan.worker.js', import.meta.url), { type: 'module' });
@@ -341,7 +336,7 @@ export default function App() {
       worker.onmessage = (ev) => {
         const m = ev.data;
         if (m.type === 'progress') {
-          setProgress({ label: 'Analyse des emplacements candidats', value: m.done, total: m.total });
+          setProgress({ label: t('app.progress.candidates'), value: m.done, total: m.total });
         } else if (m.type === 'done') {
           const sig = signature(config);
           setScan({
@@ -361,21 +356,18 @@ export default function App() {
           setProgress(null);
           setFocus((f) => ({ type: 'fit', n: f.n + 1 }));
           if (!m.top.length) {
-            setWarnings((w) => [
-              ...w,
-              'Aucun emplacement candidat retenu. Elargissez le rayon, ou desactivez le filtre d accessibilite.',
-            ]);
+            setWarnings((w) => [...w, t('app.warn.noCandidate')]);
           }
           worker.terminate();
           workerRef.current = null;
         } else if (m.type === 'error') {
-          setError(`Erreur de calcul : ${m.message}`);
+          setError(t('app.error.calc', { msg: m.message }));
           setPhase('idle');
           setProgress(null);
         }
       };
       worker.onerror = (e) => {
-        setError(`Erreur du worker : ${e.message}`);
+        setError(t('app.error.worker', { msg: e.message }));
         setPhase('idle');
         setProgress(null);
       };
@@ -395,7 +387,7 @@ export default function App() {
       setPhase('idle');
       setProgress(null);
     }
-  }, [config, estimate, linkLength, provider, radio, rx, search, tx]);
+  }, [config, estimate, linkLength, provider, radio, rx, search, tx, t, locale]);
 
   useEffect(() => () => workerRef.current?.terminate(), []);
 
@@ -520,12 +512,12 @@ export default function App() {
         setManual({ ...relay, elev: relayElev, result, sweep, height });
         setTab('results');
       } catch (e) {
-        setError(`Impossible d evaluer ce point : ${e.message}`);
+        setError(t('app.error.evalPoint', { msg: e.message }));
       } finally {
         setManualBusy(false);
       }
     },
-    [pickMode, pickStep, patch, config, scan, detail, search.heights, tx, rx, provider, txSite, rxSite, radio]
+    [pickMode, pickStep, patch, config, scan, detail, search.heights, tx, rx, provider, txSite, rxSite, radio, t]
   );
 
   const onSiteDrag = useCallback(
@@ -565,6 +557,7 @@ export default function App() {
     top: scan?.top,
     chain: scan?.chain,
     direct,
+    lang,
   };
   exportDataRef.current = exportData;
 
@@ -599,7 +592,7 @@ export default function App() {
       keep('gpx', exportGpx(exportDataRef.current));
       keep('kml', exportKml(exportDataRef.current));
     } catch (e) {
-      setExportError(`Preparation impossible : ${e.message}`);
+      setExportError(t('app.error.exportPrep', { msg: e.message }));
     }
 
     const img = (k) => {
@@ -621,6 +614,7 @@ export default function App() {
           chain: d.chain,
           relay: d.relay,
           cover: coverRef.current,
+          lang: d.lang,
         });
       } catch {
         return null;
@@ -634,7 +628,7 @@ export default function App() {
     })
       .then((h) => keep('pdf', h))
       .catch((e) => {
-        if (!cancelled) setExportError(`Rapport PDF indisponible : ${e.message}`);
+        if (!cancelled) setExportError(t('app.error.pdfUnavailable', { msg: e.message }));
       });
 
     return () => {
@@ -643,7 +637,7 @@ export default function App() {
       // telechargement lance par le navigateur, lui, est deja parti.
       setTimeout(() => created.forEach((u) => URL.revokeObjectURL(u)), 60000);
     };
-  }, [exportOpen, activeResult]);
+  }, [exportOpen, activeResult, t]);
 
   useEffect(() => {
     if (activeResult) preloadPdf().catch(() => {});
@@ -724,7 +718,7 @@ export default function App() {
       if (search.clutter) {
         try {
           const discGrid = buildGridSpec(center, center, coverInfo.maxDistM, Math.max(100, search.step));
-          setCoverProgress({ done: 0, total: 1, label: 'couverture du sol' });
+          setCoverProgress({ done: 0, total: 1, label: t('app.progress.clutter') });
           const cl = await fetchClutter({
             grid: discGrid,
             buildingBbox: null,
@@ -733,9 +727,7 @@ export default function App() {
               setCoverProgress({
                 done,
                 total,
-                label: waitingMs
-                  ? `attente Overpass ${Math.round(waitingMs / 1000)} s`
-                  : 'couverture du sol',
+                label: waitingMs ? t('app.progress.clutterQuota', { s: Math.round(waitingMs / 1000) }) : t('app.progress.clutter'),
               }),
           });
           covFoliage = new Float32Array(rays.points.length);
@@ -749,7 +741,7 @@ export default function App() {
           }
         } catch (e) {
           if (e.name === 'AbortError') throw e;
-          setWarnings((w) => [...w, `Couverture du sol indisponible pour la portee : ${e.message}.`]);
+          setWarnings((w) => [...w, t('app.warn.clutterCoverageFailed', { msg: e.message })]);
         }
       }
 
@@ -768,9 +760,7 @@ export default function App() {
       const usable = result.rings.some((r) => r.stats.mean > 1);
       if (!usable) {
         throw new Error(
-          Number.isFinite(relayForMap.elev)
-            ? 'aucune direction exploitable, le relais est peut-etre trop bas ou entierement encaisse.'
-            : 'altitude du relais inconnue.'
+          Number.isFinite(relayForMap.elev) ? t('app.error.noUsableDirection') : t('app.error.unknownElev')
         );
       }
       // Signature relue au moment du stockage, et non celle capturee avant le
@@ -783,12 +773,12 @@ export default function App() {
       const widest = result.rings.reduce((a, b) => (b.stats.max > a.stats.max ? b : a));
       setFocus((f) => ({ type: 'bounds', points: widest.polygon, n: f.n + 1 }));
     } catch (e) {
-      if (e.name !== 'AbortError') setError(`Calcul de couverture impossible : ${e.message}`);
+      if (e.name !== 'AbortError') setError(t('app.error.coverage', { msg: e.message }));
     } finally {
       setCoverBusy(false);
       setCoverProgress(null);
     }
-  }, [relayForMap, coverInfo, config.coverage, provider, coverParams, radio.desiredMargin, coverSig, search.clutter, search.step]);
+  }, [relayForMap, coverInfo, config.coverage, provider, coverParams, radio.desiredMargin, coverSig, search.clutter, search.step, t]);
 
   // Relance differee : `runCoverage` a ete reconstruit avec le nouveau rayon.
   useEffect(() => {
@@ -800,29 +790,34 @@ export default function App() {
   const stats = useMemo(() => cacheStats(), [scan, phase]);
   const busy = phase === 'dem' || phase === 'clutter' || phase === 'scan';
 
+  // Certains messages sont stockes prefixes (`warn:elevUnavailable:...`) car
+  // generes dans un effet qui s execute avant tout changement de langue : on
+  // les retraduit a l affichage plutot qu au moment ou l erreur survient.
+  const renderWarning = (w) => {
+    if (typeof w === 'string' && w.startsWith('warn:elevUnavailable:')) {
+      return t('app.warn.elevUnavailable', { msg: w.slice('warn:elevUnavailable:'.length) });
+    }
+    return w;
+  };
+
   // --- Rendu ---------------------------------------------------------------
   const configPanel = (
     <div className="space-y-3 p-3">
       <Disclaimer open={discOpen} onToggle={() => setDiscOpen((v) => !v)} />
 
       {error && (
-        <Banner tone="error" title="Erreur" onClose={() => setError(null)}>
+        <Banner tone="error" title={t('app.error.title')} onClose={() => setError(null)}>
           {error}
         </Banner>
       )}
       {warnings.map((w, i) => (
         <Banner key={i} tone="warn" onClose={() => setWarnings((ws) => ws.filter((_, j) => j !== i))}>
-          {w}
+          {renderWarning(w)}
         </Banner>
       ))}
-      {stale && (
-        <Banner tone="warn">
-          Les parametres ont change depuis le dernier balayage : relancez le calcul pour actualiser les
-          resultats.
-        </Banner>
-      )}
+      {stale && <Banner tone="warn">{t('app.warn.stale')}</Banner>}
 
-      <Section title="Emetteur (TX)" icon="▲">
+      <Section title={t('app.section.tx')} icon="▲">
         <SitePanel
           site={tx}
           onChange={(v) => patchSite('tx', v)}
@@ -834,7 +829,7 @@ export default function App() {
         />
       </Section>
 
-      <Section title="Recepteur (RX)" icon="▼">
+      <Section title={t('app.section.rx')} icon="▼">
         <SitePanel
           site={rx}
           onChange={(v) => patchSite('rx', v)}
@@ -846,7 +841,7 @@ export default function App() {
         />
       </Section>
 
-      <Section title="Parametres radio" icon="≡">
+      <Section title={t('app.section.radio')} icon="≡">
         <RadioPanel
           radio={radio}
           onChange={(v) => patch('radio', v)}
@@ -855,7 +850,7 @@ export default function App() {
         />
       </Section>
 
-      <Section title="Recherche du relais" icon="◉">
+      <Section title={t('app.section.search')} icon="◉">
         <SearchPanel
           search={search}
           onChange={(v) => patch('search', v)}
@@ -867,24 +862,24 @@ export default function App() {
         />
       </Section>
 
-      <Section title="Affichage" icon="▦" defaultOpen={false}>
+      <Section title={t('app.section.display')} icon="▦" defaultOpen={false}>
         <Checkbox
           checked={config.ui.heatmap}
           onChange={(v) => patch('ui', { ...config.ui, heatmap: v })}
-          label="Carte de chaleur de la qualite"
+          label={t('app.display.heatmap')}
         />
         <Checkbox
           checked={config.ui.candidates}
           onChange={(v) => patch('ui', { ...config.ui, candidates: v })}
-          label="Marqueurs des candidats alternatifs"
+          label={t('app.display.candidates')}
         />
         <Checkbox
           checked={config.ui.coverage}
           onChange={(v) => patch('ui', { ...config.ui, coverage: v })}
-          label="Enveloppe de portee du relais"
+          label={t('app.display.coverage')}
         />
         <div className="pt-1 text-[11px] text-zinc-500">
-          Cache MNT : {stats.tiles} tuiles, {(stats.bytes / 1024).toFixed(0)} Ko.
+          {t('app.cacheStats', { tiles: stats.tiles, kb: (stats.bytes / 1024).toFixed(0) })}
         </div>
         <div className="flex flex-wrap gap-2 pt-1">
           <button
@@ -893,10 +888,10 @@ export default function App() {
             onClick={() => {
               clearCache();
               clearRoadCache();
-              setWarnings((w) => [...w, 'Cache d altitudes vide.']);
+              setWarnings((w) => [...w, t('app.warn.cacheCleared')]);
             }}
           >
-            Vider le cache
+            {t('app.clearCache')}
           </button>
           <button
             type="button"
@@ -908,7 +903,7 @@ export default function App() {
               setManual(null);
             }}
           >
-            Reinitialiser
+            {t('app.resetConfig')}
           </button>
         </div>
       </Section>
@@ -919,22 +914,22 @@ export default function App() {
     <div className="space-y-4 p-3">
       {!scan && !busy && (
         <div className="rounded-xl border border-dashed border-ink-500 px-4 py-8 text-center text-[13px] leading-relaxed text-zinc-500">
-          Renseignez les deux sites, puis lancez le balayage.
+          {t('app.emptyState1')}
           <br />
-          L application echantillonne le relief entre TX et RX et classe les emplacements de relais.
+          {t('app.emptyState2')}
         </div>
       )}
 
       {manual && (
         <div className="card p-3">
           <div className="mb-2 flex items-center justify-between">
-            <h3 className="text-[13px] font-semibold text-purple-300">Point force</h3>
+            <h3 className="text-[13px] font-semibold text-purple-300">{t('app.forcedPoint')}</h3>
             <button type="button" className="btn-ghost !py-1 !text-[11px]" onClick={() => setManual(null)}>
-              Revenir au classement
+              {t('app.backToRanking')}
             </button>
           </div>
           <p className="mb-3 font-mono text-[11px] text-zinc-500">
-            {manual.lat.toFixed(5)}, {manual.lon.toFixed(5)} - altitude {manual.elev?.toFixed(0)} m
+            {t('app.manualCoords', { lat: manual.lat.toFixed(5), lon: manual.lon.toFixed(5), elev: manual.elev?.toFixed(0) })}
           </p>
           <LinkSummary result={manual.result} radio={radio} direct={direct} tx={txSite} rx={rxSite} relay={manual} />
         </div>
@@ -943,7 +938,7 @@ export default function App() {
       {!manual && scan?.chain && (
         <div className="card p-3">
           <h3 className="mb-3 text-[13px] font-semibold uppercase tracking-wider text-zinc-400">
-            Chaine de relais
+            {t('app.chainTitle')}
           </h3>
           <ChainPanel
             chain={scan.chain}
@@ -959,12 +954,9 @@ export default function App() {
         <>
           <div className="card p-3">
             <h3 className="text-[13px] font-semibold uppercase tracking-wider text-zinc-400">
-              Meilleurs emplacements pour un relais unique
+              {t('app.bestSitesTitle')}
             </h3>
-            <p className="mb-3 mt-1 text-[11px] leading-relaxed text-zinc-500">
-              Classement independant de la chaine ci-dessus : les meilleurs sites si l on ne pose
-              qu un seul relais. Utile quand un second n est pas envisageable.
-            </p>
+            <p className="mb-3 mt-1 text-[11px] leading-relaxed text-zinc-500">{t('app.bestSitesHint')}</p>
             <ResultsTable
               rows={scan.top}
               roads={roads}
@@ -983,10 +975,10 @@ export default function App() {
             <div className="card p-3">
               <div className="mb-3 flex flex-wrap items-center justify-between gap-2">
                 <h3 className="text-[13px] font-semibold uppercase tracking-wider text-zinc-400">
-                  Site #{selected + 1}
+                  {t('app.siteN', { n: selected + 1 })}
                 </h3>
                 <div className="flex flex-wrap items-center gap-1.5">
-                  <span className="text-[11px] text-zinc-500">Hauteur :</span>
+                  <span className="text-[11px] text-zinc-500">{t('app.height')}</span>
                   {scan.stats.heights.map((h) => (
                     <button
                       key={h}
@@ -1012,18 +1004,18 @@ export default function App() {
       {activeResult && (
         <div className="card space-y-5 p-3">
           <h3 className="text-[13px] font-semibold uppercase tracking-wider text-zinc-400">
-            Profils d elevation
+            {t('app.profilesTitle')}
           </h3>
           <ProfileChart
             hop={activeResult.hop1}
-            title="Bond 1 : TX vers relais"
-            subtitle={`${(activeResult.hop1.distM / 1000).toFixed(2)} km - diffraction ${activeResult.hop1.diffraction.toFixed(1)} dB`}
+            title={t('app.hop1Title')}
+            subtitle={t('app.hopSubtitle', { km: (activeResult.hop1.distM / 1000).toFixed(2), db: activeResult.hop1.diffraction.toFixed(1) })}
             onReady={(c) => (chartsRef.current.p1 = c)}
           />
           <ProfileChart
             hop={activeResult.hop2}
-            title="Bond 2 : relais vers RX"
-            subtitle={`${(activeResult.hop2.distM / 1000).toFixed(2)} km - diffraction ${activeResult.hop2.diffraction.toFixed(1)} dB`}
+            title={t('app.hop2Title')}
+            subtitle={t('app.hopSubtitle', { km: (activeResult.hop2.distM / 1000).toFixed(2), db: activeResult.hop2.diffraction.toFixed(1) })}
             onReady={(c) => (chartsRef.current.p2 = c)}
           />
         </div>
@@ -1032,11 +1024,9 @@ export default function App() {
       {activeSweep && (
         <div className="card p-3">
           <h3 className="mb-1 text-[13px] font-semibold uppercase tracking-wider text-zinc-400">
-            Comparateur de hauteurs
+            {t('app.heightComparerTitle')}
           </h3>
-          <p className="mb-3 text-[11px] text-zinc-500">
-            Marge obtenue selon la hauteur d antenne du relais, de 2 a 20 m.
-          </p>
+          <p className="mb-3 text-[11px] text-zinc-500">{t('app.heightComparerHint')}</p>
           <HeightChart
             rows={activeSweep}
             desiredMargin={radio.desiredMargin}
@@ -1049,7 +1039,7 @@ export default function App() {
       {activeResult && (
         <div className="card p-3">
           <h3 className="mb-3 text-[13px] font-semibold uppercase tracking-wider text-zinc-400">
-            Portee du relais
+            {t('app.rangeTitle')}
           </h3>
           <CoveragePanel
             coverage={config.coverage}
@@ -1070,12 +1060,11 @@ export default function App() {
 
       {scan?.stats && (
         <div className="px-1 text-[11px] leading-relaxed text-zinc-600">
-          {scan.stats.candidates.toLocaleString('fr-FR')} mailles candidates,{' '}
-          {scan.stats.evaluated.toLocaleString('fr-FR')} evaluees en {scan.stats.ms} ms.
-          {scan.stats.excludedSlope > 0 && <> {scan.stats.excludedSlope} ecartees pour pente &gt; 30 deg.</>}
-          {scan.stats.excludedWater > 0 && <> {scan.stats.excludedWater} ecartees comme surfaces en eau.</>}
-          {scan.stats.excludedNoData > 0 && <> {scan.stats.excludedNoData} sans donnee d altitude.</>}{' '}
-          Source : {PROVIDER_BY_ID[provider]?.label}.
+          {t('app.scanStats', { candidates: scan.stats.candidates.toLocaleString(locale), evaluated: scan.stats.evaluated.toLocaleString(locale), ms: scan.stats.ms })}
+          {scan.stats.excludedSlope > 0 && <>{t('app.scanStats.slope', { n: scan.stats.excludedSlope })}</>}
+          {scan.stats.excludedWater > 0 && <>{t('app.scanStats.water', { n: scan.stats.excludedWater })}</>}
+          {scan.stats.excludedNoData > 0 && <>{t('app.scanStats.noData', { n: scan.stats.excludedNoData })}</>}
+          {t('app.scanStats.source', { label: PROVIDER_BY_ID[provider]?.label })}
         </div>
       )}
     </div>
@@ -1094,27 +1083,47 @@ export default function App() {
           </span>
           <div className="leading-tight">
             <h1 className="text-[15px] font-semibold text-zinc-100">LoRa Relay Planner</h1>
-            <p className="text-[11px] text-zinc-500">Implantation de relais Meshtastic sur relief reel</p>
+            <p className="text-[11px] text-zinc-500">{t('app.subtitle')}</p>
           </div>
         </div>
 
         <div className="ml-auto flex flex-wrap items-center gap-2">
           {activeResult && (
             <span className="hidden items-center gap-1.5 text-[11px] text-zinc-500 sm:flex">
-              Marge retenue <MarginChip value={activeResult.margin} />
+              {t('app.marginRetained')} <MarginChip value={activeResult.margin} />
             </span>
           )}
+          {/* Bascule de langue : deux libelles courts plutot qu un menu, pour
+              rester visible et instantane. */}
+          <div className="flex items-center rounded-md border border-ink-500 bg-ink-900/60 p-0.5 text-[11px] font-medium">
+            <button
+              type="button"
+              onClick={() => setLang('fr')}
+              aria-pressed={lang === 'fr'}
+              className={`rounded px-2 py-1 transition ${lang === 'fr' ? 'bg-sky-500/20 text-sky-200' : 'text-zinc-500 hover:text-zinc-300'}`}
+            >
+              FR
+            </button>
+            <button
+              type="button"
+              onClick={() => setLang('en')}
+              aria-pressed={lang === 'en'}
+              className={`rounded px-2 py-1 transition ${lang === 'en' ? 'bg-sky-500/20 text-sky-200' : 'text-zinc-500 hover:text-zinc-300'}`}
+            >
+              EN
+            </button>
+          </div>
           {busy ? (
             <button type="button" className="btn-danger" onClick={cancelScan}>
               <Spinner className="h-3.5 w-3.5" />
-              Annuler
+              {t('app.cancel')}
             </button>
           ) : (
             <button type="button" className="btn-primary" onClick={runScan}>
               <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.2">
                 <path d="M5 3l14 9-14 9V3z" strokeLinejoin="round" />
               </svg>
-              {scan ? 'Relancer' : 'Lancer le balayage'}
+              {scan ? t('app.rerun') : t('app.runScan')}
             </button>
           )}
           <div data-export-menu>
@@ -1128,7 +1137,7 @@ export default function App() {
               aria-expanded={exportOpen}
               aria-haspopup="menu"
             >
-              Exporter
+              {t('app.export')}
               <svg viewBox="0 0 24 24" className="h-3 w-3" fill="none" stroke="currentColor" strokeWidth="2.5">
                 <path d="M6 9l6 6 6-6" strokeLinecap="round" strokeLinejoin="round" />
               </svg>
@@ -1141,15 +1150,12 @@ export default function App() {
               width={248}
             >
               {!activeResult ? (
-                <p className="px-3 py-3 text-[11px] leading-relaxed text-zinc-400">
-                  Rien a exporter pour l instant. Lancez un balayage, puis selectionnez un
-                  emplacement de relais.
-                </p>
+                <p className="px-3 py-3 text-[11px] leading-relaxed text-zinc-400">{t('app.exportEmpty')}</p>
               ) : (
                 [
-                  ['gpx', 'GPX', 'Trois points, pour un GPS'],
-                  ['kml', 'KML', 'Google Earth, avec le verdict'],
-                  ['pdf', 'Rapport PDF', 'Bilan complet et graphiques'],
+                  ['gpx', t('app.export.gpx.label'), t('app.export.gpx.hint')],
+                  ['kml', t('app.export.kml.label'), t('app.export.kml.hint')],
+                  ['pdf', t('app.export.pdf.label'), t('app.export.pdf.hint')],
                 ].map(([kind, label, hint]) => {
                   const file = exportFiles?.[kind];
                   // Une vraie ancre, sur laquelle l utilisateur clique
@@ -1165,7 +1171,9 @@ export default function App() {
                       <span className="flex items-baseline justify-between gap-2">
                         <span className="text-[12px] text-zinc-200">{label}</span>
                         <span className="font-mono text-[10px] text-zinc-500">
-                          {file.size < 1024 ? `${file.size} o` : `${(file.size / 1024).toFixed(0)} Ko`}
+                          {file.size < 1024
+                            ? `${file.size} ${lang === 'fr' ? 'o' : 'B'}`
+                            : `${(file.size / 1024).toFixed(0)} ${lang === 'fr' ? 'Ko' : 'KB'}`}
                         </span>
                       </span>
                       <span className="block text-[10px] text-zinc-500">{hint}</span>
@@ -1176,7 +1184,7 @@ export default function App() {
                         <Spinner className="h-3 w-3" />
                         {label}
                       </span>
-                      <span className="block text-[10px] text-zinc-500">preparation...</span>
+                      <span className="block text-[10px] text-zinc-500">{t('app.exportPreparing')}</span>
                     </span>
                   );
                 })
@@ -1243,7 +1251,7 @@ export default function App() {
             {manualBusy && (
               <div className="absolute inset-0 z-[600] grid place-items-center bg-ink-900/60 backdrop-blur-sm">
                 <span className="flex items-center gap-2 rounded-lg border border-ink-500 bg-ink-800 px-3 py-2 text-[12px] text-zinc-300">
-                  <Spinner /> Evaluation du point...
+                  <Spinner /> {t('app.progress.evaluatingPoint')}
                 </span>
               </div>
             )}
@@ -1262,9 +1270,9 @@ export default function App() {
       {/* Navigation mobile */}
       <nav className="z-30 flex shrink-0 border-t border-ink-500/70 bg-ink-800 lg:hidden">
         {[
-          ['config', 'Reglages', 'M4 6h16M4 12h16M4 18h16'],
-          ['map', 'Carte', 'M9 3l6 3 6-3v15l-6 3-6-3-6 3V6z'],
-          ['results', 'Resultats', 'M4 19V9m5 10V5m5 14v-7m5 7V8'],
+          ['config', t('app.nav.config'), 'M4 6h16M4 12h16M4 18h16'],
+          ['map', t('app.nav.map'), 'M9 3l6 3 6-3v15l-6 3-6-3-6 3V6z'],
+          ['results', t('app.nav.results'), 'M4 19V9m5 10V5m5 14v-7m5 7V8'],
         ].map(([id, label, path]) => (
           <button
             key={id}
