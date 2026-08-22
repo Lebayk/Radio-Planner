@@ -220,7 +220,7 @@ export function preloadPdf() {
  */
 export async function exportPdf(data, images = {}) {
   const { jsPDF } = await preloadPdf();
-  const { tx, rx, relay, radio, search, provider, result, top, direct } = data;
+  const { tx, rx, relay, radio, search, provider, result, top, chain, direct } = data;
 
   const doc = new jsPDF({ unit: 'mm', format: 'a4' });
   const W = 210;
@@ -341,12 +341,88 @@ export async function exportPdf(data, images = {}) {
     ],
   ]);
   if (relay) {
+    const d1 = result?.hop1?.distM;
+    const d2 = result?.hop2?.distM;
     kv([
       [
         'Relais retenu',
         `${relay.lat.toFixed(5)}, ${relay.lon.toFixed(5)} - sol ${fmt(relay.elev, 0, 'm')} - antenne ${relay.height} m / ${radio.relayGain} dBi`,
       ],
     ]);
+    if (Number.isFinite(d1) && Number.isFinite(d2)) {
+      kv([
+        [
+          'Distances',
+          `TX ${fmt(d1 / 1000, 2, 'km')} - RX ${fmt(d2 / 1000, 2, 'km')} ` +
+            `(trajet total ${fmt((d1 + d2) / 1000, 2, 'km')})`,
+        ],
+      ]);
+    }
+  }
+
+  // La chaine est la solution recommandee : sans elle le rapport decrit une
+  // liaison a relais unique qui n est pas celle que l on preconise.
+  if (chain?.nodes?.length > 2) {
+    heading('Chaine de relais');
+    const labelOf = (i) =>
+      i === 0 ? 'TX' : i === chain.nodes.length - 1 ? 'RX' : `R${i}`;
+
+    kv([
+      [
+        `${chain.relays} relais`,
+        (chain.feasible ? 'Objectif de marge atteint' : 'Objectif non atteint') +
+          ` - maillon le plus faible ${fmt(chain.margin95, 1, 'dB')} a 95 % ` +
+          `(objectif ${chain.target} dB)`,
+      ],
+    ]);
+
+    chain.nodes.forEach((n, i) => {
+      if (!n.relay) return;
+      const dPrev = chain.hops?.[i - 1]?.distM;
+      const dNext = chain.hops?.[i]?.distM;
+      kv([
+        [
+          labelOf(i),
+          `${n.lat.toFixed(5)}, ${n.lon.toFixed(5)} - sol ${fmt(n.elev, 0, 'm')} - mat ${n.height} m` +
+            ` - a ${fmt(dPrev / 1000, 2, 'km')} de ${labelOf(i - 1)}` +
+            ` et ${fmt(dNext / 1000, 2, 'km')} de ${labelOf(i + 1)}`,
+        ],
+      ]);
+    });
+
+    line(1);
+    const hCols = [M, M + 40, M + 68, M + 96, M + 128];
+    doc.setFont('helvetica', 'bold');
+    ['Bond', 'Distance', 'Vegetation', 'Fresnel', 'Marge 95 %'].forEach((h, i) =>
+      doc.text(h, hCols[i], y)
+    );
+    line(4.6);
+    doc.setFont('helvetica', 'normal');
+    (chain.hops || []).forEach((h, i) => {
+      if (!h) return;
+      const vals = [
+        `${labelOf(i)} -> ${labelOf(i + 1)}`,
+        fmt(h.distM / 1000, 2, 'km'),
+        h.foliage > 0.5 ? fmt(h.foliage, 1, 'dB') : '-',
+        fmt(h.clearance * 100, 0, '%'),
+        fmt(h.margin95, 1, 'dB'),
+      ];
+      vals.forEach((v, j) => doc.text(v, hCols[j], y));
+      line(4.6);
+    });
+
+    const total = (chain.hops || []).reduce((t, h) => t + (h?.distM ?? 0), 0);
+    doc.setTextColor(110, 110, 110);
+    doc.setFontSize(8);
+    doc.text(
+      `Longueur cumulee du trajet : ${fmt(total / 1000, 2, 'km')}, ` +
+        `contre ${fmt((direct?.distM ?? 0) / 1000, 2, 'km')} a vol d oiseau.`,
+      M,
+      y
+    );
+    doc.setFontSize(9);
+    doc.setTextColor(40, 40, 40);
+    line(5);
   }
 
   heading('Parametres radio');
@@ -406,8 +482,8 @@ export async function exportPdf(data, images = {}) {
 
   if (top?.length) {
     heading('Classement des emplacements');
-    const head = ['#', 'Latitude', 'Longitude', 'Alt.', 'Ht', 'B1', 'B2', 'Globale', 'Fresnel'];
-    const cols = [M, M + 8, M + 33, M + 58, M + 71, M + 83, M + 98, M + 113, M + 136];
+    const head = ['#', 'Latitude', 'Longitude', 'Alt.', 'Ht', 'd TX', 'd RX', 'B1', 'B2', 'Globale', 'Fresnel'];
+    const cols = [M, M + 7, M + 30, M + 53, M + 65, M + 76, M + 90, M + 104, M + 118, M + 132, M + 152];
     doc.setFont('helvetica', 'bold');
     head.forEach((h, i) => doc.text(h, cols[i], y));
     line(4.6);
@@ -419,6 +495,8 @@ export async function exportPdf(data, images = {}) {
         r.lon.toFixed(5),
         fmt(r.elev, 0),
         `${r.best.h} m`,
+        fmt(r.d1 / 1000, 2),
+        fmt(r.d2 / 1000, 2),
         fmt(r.best.m1, 1),
         fmt(r.best.m2, 1),
         fmt(r.best.margin, 1),
@@ -429,7 +507,12 @@ export async function exportPdf(data, images = {}) {
     });
     doc.setTextColor(110, 110, 110);
     doc.setFontSize(8);
-    doc.text('Marges en dB. Ht = hauteur d antenne du relais retenue pour ce site.', M, y);
+    doc.text(
+      'Marges en dB, distances en km. Ht = hauteur d antenne retenue pour ce site, ' +
+        'd TX et d RX = distances aux deux extremites.',
+      M,
+      y
+    );
     doc.setFontSize(9);
     doc.setTextColor(40, 40, 40);
     line(5);
