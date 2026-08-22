@@ -2,7 +2,7 @@
 
 import { PRESET_BY_ID, REGION_BY_ID, erp, eirp, erpLimitFor, assessLink } from './radio.js';
 import { PROVIDER_BY_ID } from './elevation.js';
-import { toDMS } from './geo.js';
+import { toDMS, bearing, formatBearing } from './geo.js';
 
 export const DISCLAIMER_SHORT =
   'Relief IGN, vegetation et bati OpenStreetMap. Les hauteurs de couvert sont des valeurs par defaut : OSM ne renseigne presque jamais la hauteur de la vegetation, et seuls 8 % des batiments portent une hauteur. Le bruit radio local, les reflexions et la variabilite temporelle ne sont pas modelises. Toute simulation doit etre confirmee par un test terrain avec deux noeuds reels.';
@@ -47,21 +47,23 @@ const stamp = () => new Date().toISOString().slice(0, 19).replace(/[:T]/g, '-');
  */
 function linkPoints(tx, rx, relay, chain) {
   if (chain?.nodes?.length > 2) {
-    return chain.nodes.map((n, i) => {
-      if (i === 0) {
-        return { name: tx.name || 'TX', lat: n.lat, lon: n.lon, ele: n.elev, role: 'Emetteur' };
-      }
-      if (i === chain.nodes.length - 1) {
-        return { name: rx.name || 'RX', lat: n.lat, lon: n.lon, ele: n.elev, role: 'Recepteur' };
-      }
-      return {
-        name: `RELAIS ${i}`,
-        lat: n.lat,
-        lon: n.lon,
-        ele: n.elev,
-        role: `Relais ${i} sur ${chain.relays} (antenne ${n.height} m)`,
-      };
-    });
+    return withBearings(
+      chain.nodes.map((n, i) => {
+        if (i === 0) {
+          return { name: tx.name || 'TX', lat: n.lat, lon: n.lon, ele: n.elev, role: 'Emetteur' };
+        }
+        if (i === chain.nodes.length - 1) {
+          return { name: rx.name || 'RX', lat: n.lat, lon: n.lon, ele: n.elev, role: 'Recepteur' };
+        }
+        return {
+          name: `RELAIS ${i}`,
+          lat: n.lat,
+          lon: n.lon,
+          ele: n.elev,
+          role: `Relais ${i} sur ${chain.relays} (antenne ${n.height} m)`,
+        };
+      })
+    );
   }
 
   const pts = [
@@ -77,7 +79,23 @@ function linkPoints(tx, rx, relay, chain) {
       role: `Relais (antenne ${relay.height} m)`,
     });
   }
-  return pts;
+  return withBearings(pts);
+}
+
+/**
+ * Ajoute a chaque point le cap exact a viser depuis cet endroit : en avant
+ * vers le suivant, en arriere vers le precedent. TX ne regarde qu en avant,
+ * RX qu en arriere ; un relais intermediaire peut avoir besoin des deux s il
+ * est directionnel. Calcule sur le grand cercle (nord vrai), pas une simple
+ * reciproque a 180 deg.
+ */
+function withBearings(pts) {
+  return pts.map((p, i) => {
+    const caps = [];
+    if (i < pts.length - 1) caps.push(`vers ${pts[i + 1].name} : ${formatBearing(bearing(p, pts[i + 1]))}`);
+    if (i > 0) caps.push(`vers ${pts[i - 1].name} : ${formatBearing(bearing(p, pts[i - 1]))}`);
+    return caps.length ? { ...p, role: `${p.role} - Cap antenne (nord vrai) ${caps.join(' / ')}` } : p;
+  });
 }
 
 // ---------------------------------------------------------------------------
@@ -329,15 +347,25 @@ export async function exportPdf(data, images = {}) {
     doc.setFontSize(9);
   }
 
+  // Cap exact a viser depuis TX et RX : vers le premier relais de la chaine
+  // s il y en a une, sinon le relais unique, sinon l un vers l autre en
+  // liaison directe. Calcule sur le grand cercle (nord vrai).
+  const isChainRoute = chain?.nodes?.length > 2;
+  const txTarget = isChainRoute ? chain.nodes[1] : relay || rx;
+  const rxTarget = isChainRoute ? chain.nodes[chain.nodes.length - 2] : relay || tx;
+  const capOf = (origin, target) => (target ? formatBearing(bearing(origin, target)) : '-');
+
   heading('Sites');
   kv([
     [
       'Emetteur (TX)',
-      `${tx.name} - ${tx.lat.toFixed(5)}, ${tx.lon.toFixed(5)} - sol ${fmt(tx.elev, 0, 'm')} - antenne ${tx.height} m / ${tx.gain} dBi`,
+      `${tx.name} - ${tx.lat.toFixed(5)}, ${tx.lon.toFixed(5)} - sol ${fmt(tx.elev, 0, 'm')} - antenne ${tx.height} m / ${tx.gain} dBi` +
+        ` - cap antenne ${capOf(tx, txTarget)}`,
     ],
     [
       'Recepteur (RX)',
-      `${rx.name} - ${rx.lat.toFixed(5)}, ${rx.lon.toFixed(5)} - sol ${fmt(rx.elev, 0, 'm')} - antenne ${rx.height} m / ${rx.gain} dBi`,
+      `${rx.name} - ${rx.lat.toFixed(5)}, ${rx.lon.toFixed(5)} - sol ${fmt(rx.elev, 0, 'm')} - antenne ${rx.height} m / ${rx.gain} dBi` +
+        ` - cap antenne ${capOf(rx, rxTarget)}`,
     ],
   ]);
   if (relay) {
@@ -346,7 +374,8 @@ export async function exportPdf(data, images = {}) {
     kv([
       [
         'Relais retenu',
-        `${relay.lat.toFixed(5)}, ${relay.lon.toFixed(5)} - sol ${fmt(relay.elev, 0, 'm')} - antenne ${relay.height} m / ${radio.relayGain} dBi`,
+        `${relay.lat.toFixed(5)}, ${relay.lon.toFixed(5)} - sol ${fmt(relay.elev, 0, 'm')} - antenne ${relay.height} m / ${radio.relayGain} dBi` +
+          ` - cap vers TX ${capOf(relay, tx)} / cap vers RX ${capOf(relay, rx)}`,
       ],
     ]);
     if (Number.isFinite(d1) && Number.isFinite(d2)) {
@@ -358,6 +387,19 @@ export async function exportPdf(data, images = {}) {
         ],
       ]);
     }
+  }
+  if (!isChainRoute && (relay || result)) {
+    doc.setFontSize(8);
+    doc.setTextColor(110, 110, 110);
+    doc.text(
+      'Caps en azimut geographique (nord vrai) : corrigez de la declinaison magnetique locale ' +
+        'pour une boussole classique.',
+      M,
+      y
+    );
+    doc.setFontSize(9);
+    doc.setTextColor(40, 40, 40);
+    line(5);
   }
 
   // La chaine est la solution recommandee : sans elle le rapport decrit une
@@ -385,15 +427,16 @@ export async function exportPdf(data, images = {}) {
           labelOf(i),
           `${n.lat.toFixed(5)}, ${n.lon.toFixed(5)} - sol ${fmt(n.elev, 0, 'm')} - mat ${n.height} m` +
             ` - a ${fmt(dPrev / 1000, 2, 'km')} de ${labelOf(i - 1)}` +
-            ` et ${fmt(dNext / 1000, 2, 'km')} de ${labelOf(i + 1)}`,
+            ` et ${fmt(dNext / 1000, 2, 'km')} de ${labelOf(i + 1)}` +
+            ` - cap vers ${labelOf(i - 1)} ${capOf(n, chain.nodes[i - 1])} / cap vers ${labelOf(i + 1)} ${capOf(n, chain.nodes[i + 1])}`,
         ],
       ]);
     });
 
     line(1);
-    const hCols = [M, M + 40, M + 68, M + 96, M + 128];
+    const hCols = [M, M + 28, M + 60, M + 82, M + 108, M + 132];
     doc.setFont('helvetica', 'bold');
-    ['Bond', 'Distance', 'Vegetation', 'Fresnel', 'Marge 95 %'].forEach((h, i) =>
+    ['Bond', 'Cap', 'Distance', 'Vegetation', 'Fresnel', 'Marge 95 %'].forEach((h, i) =>
       doc.text(h, hCols[i], y)
     );
     line(4.6);
@@ -402,6 +445,7 @@ export async function exportPdf(data, images = {}) {
       if (!h) return;
       const vals = [
         `${labelOf(i)} -> ${labelOf(i + 1)}`,
+        capOf(chain.nodes[i], chain.nodes[i + 1]),
         fmt(h.distM / 1000, 2, 'km'),
         h.foliage > 0.5 ? fmt(h.foliage, 1, 'dB') : '-',
         fmt(h.clearance * 100, 0, '%'),
@@ -416,7 +460,9 @@ export async function exportPdf(data, images = {}) {
     doc.setFontSize(8);
     doc.text(
       `Longueur cumulee du trajet : ${fmt(total / 1000, 2, 'km')}, ` +
-        `contre ${fmt((direct?.distM ?? 0) / 1000, 2, 'km')} a vol d oiseau.`,
+        `contre ${fmt((direct?.distM ?? 0) / 1000, 2, 'km')} a vol d oiseau. ` +
+        `Caps en azimut geographique (nord vrai) : corrigez de la declinaison magnetique locale ` +
+        `pour une boussole classique.`,
       M,
       y
     );

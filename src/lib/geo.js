@@ -124,6 +124,30 @@ export function fmtCoord(lat, lon, dec = 5) {
   return `${lat.toFixed(dec)}, ${lon.toFixed(dec)}`;
 }
 
+const COMPASS_16 = [
+  'N', 'NNE', 'NE', 'ENE', 'E', 'ESE', 'SE', 'SSE',
+  'S', 'SSW', 'SW', 'WSW', 'W', 'WNW', 'NW', 'NNW',
+];
+
+/** Point cardinal le plus proche (16 directions) pour un azimut en degres. */
+export function compassPoint(deg) {
+  if (!Number.isFinite(deg)) return '';
+  const i = Math.round((((deg % 360) + 360) % 360) / 22.5) % 16;
+  return COMPASS_16[i];
+}
+
+/**
+ * Azimut mis en forme pour l affichage : « 134° (SE) ».
+ *
+ * L azimut vient de `bearing()`, un calcul de cap orthodromique exact (pas
+ * une approximation planaire) : c est la ou pointer une antenne directionnelle
+ * pour viser l autre extremite d un bond, boussole en main sur le terrain.
+ */
+export function formatBearing(deg) {
+  if (!Number.isFinite(deg)) return '-';
+  return `${Math.round(deg)}° (${compassPoint(deg)})`;
+}
+
 /** Formatage en degres / minutes / secondes. */
 export function toDMS(value, isLat) {
   const hemi = isLat ? (value >= 0 ? 'N' : 'S') : value >= 0 ? 'E' : 'O';

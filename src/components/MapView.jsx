@@ -1,7 +1,7 @@
 import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import L from 'leaflet';
 import { marginColor, heatRgb } from '../lib/colors.js';
-import { destination, bearing } from '../lib/geo.js';
+import { destination, bearing, formatBearing } from '../lib/geo.js';
 
 const BASE_LAYERS = () => ({
   'Relief (OpenTopoMap)': L.tileLayer('https://{s}.tile.opentopomap.org/{z}/{x}/{y}.png', {
@@ -187,17 +187,33 @@ export default function MapView({
       return m;
     };
 
-    mk(tx, 'tx', 'TX').bindTooltip(`${tx.name} (TX)`, { direction: 'top', offset: [0, -14] }).addTo(markers);
-    mk(rx, 'rx', 'RX').bindTooltip(`${rx.name} (RX)`, { direction: 'top', offset: [0, -14] }).addTo(markers);
-
     // Quand une chaine est tracee, le relais unique et ses deux segments
     // feraient doublon par-dessus.
     const chainDrawn = chain?.relays > 0;
 
+    // Cap exact a viser depuis TX et RX : vers le premier relais de la
+    // chaine s il y en a une, sinon vers le relais unique, sinon l un vers
+    // l autre en liaison directe.
+    const txTarget = chainDrawn ? chain.nodes[1] : relay || rx;
+    const rxTarget = chainDrawn ? chain.nodes[chain.nodes.length - 2] : relay || tx;
+    // Origine passee explicitement : txTarget et rxTarget pointent souvent
+    // vers le meme relais unique, un test d egalite de reference se serait
+    // trompe de sens pour l un des deux caps.
+    const capLine = (origin, target) =>
+      target ? `<br>cap ${formatBearing(bearing(origin, target))}` : '';
+
+    mk(tx, 'tx', 'TX')
+      .bindTooltip(`${tx.name} (TX)${capLine(tx, txTarget)}`, { direction: 'top', offset: [0, -14] })
+      .addTo(markers);
+    mk(rx, 'rx', 'RX')
+      .bindTooltip(`${rx.name} (RX)${capLine(rx, rxTarget)}`, { direction: 'top', offset: [0, -14] })
+      .addTo(markers);
+
     if (relay && !chainDrawn) {
       const m = mk(relay, 'relay', 'REL');
       m.bindTooltip(
-        `Relais - antenne ${relay.height} m<br>marge ${relay.margin?.toFixed(1) ?? '-'} dB`,
+        `Relais - antenne ${relay.height} m<br>marge ${relay.margin?.toFixed(1) ?? '-'} dB` +
+          `<br>cap ← ${formatBearing(bearing(relay, tx))} · cap → ${formatBearing(bearing(relay, rx))}`,
         { direction: 'top', offset: [0, -16] }
       ).addTo(markers);
 
@@ -241,6 +257,7 @@ export default function MapView({
       )
         .bindTooltip(
           `Bond ${i + 1} : ${(hop?.distM / 1000).toFixed(2)} km<br>` +
+            `cap ${formatBearing(bearing(nodes[i], nodes[i + 1]))}<br>` +
             `marge 95 % ${hop?.margin95?.toFixed(1) ?? '-'} dB`,
           { sticky: true }
         )
@@ -254,7 +271,8 @@ export default function MapView({
         zIndexOffset: 600,
       })
         .bindTooltip(
-          `Relais R${i} - antenne ${n.height} m<br>sol ${n.elev?.toFixed(0)} m`,
+          `Relais R${i} - antenne ${n.height} m<br>sol ${n.elev?.toFixed(0)} m<br>` +
+            `cap ← ${formatBearing(bearing(n, nodes[i - 1]))} · cap → ${formatBearing(bearing(n, nodes[i + 1]))}`,
           { direction: 'top', offset: [0, -16] }
         )
         .addTo(st.groups.chain);

@@ -1,6 +1,7 @@
 import React, { useState } from 'react';
 import { Field, NumberInput, Select, Checkbox, Banner, TextInput } from './ui.jsx';
 import { PROVIDERS, PROVIDER_BY_ID, getOpenTopoDataBase, setOpenTopoDataBase } from '../lib/elevation.js';
+import { formatBearing } from '../lib/geo.js';
 
 const PRESET_HEIGHTS = [2, 4, 6, 8, 10, 12, 15, 20, 25, 30];
 
@@ -68,7 +69,7 @@ function HeightPicker({ heights, onChange }) {
   );
 }
 
-export default function SearchPanel({ search, onChange, provider, onProviderChange, estimate, linkLength }) {
+export default function SearchPanel({ search, onChange, provider, onProviderChange, estimate, linkLength, linkBearing }) {
   const set = (patch) => onChange({ ...search, ...patch });
   const p = PROVIDER_BY_ID[provider];
   const tooFine = search.step < p.resolution * 0.8;
@@ -174,6 +175,10 @@ export default function SearchPanel({ search, onChange, provider, onProviderChan
           <span className="font-mono text-zinc-300">
             {Number.isFinite(linkLength) ? `${(linkLength / 1000).toFixed(2)} km` : '-'}
           </span>
+        </div>
+        <div className="flex items-center justify-between">
+          <span className="text-zinc-500">Cap TX vers RX</span>
+          <span className="font-mono text-zinc-300">{formatBearing(linkBearing)}</span>
         </div>
         <div className="flex items-center justify-between">
           <span className="text-zinc-500">Points MNT a couvrir</span>

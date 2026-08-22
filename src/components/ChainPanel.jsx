@@ -1,5 +1,6 @@
 import React from 'react';
 import { MarginChip } from './ui.jsx';
+import { bearing, formatBearing } from '../lib/geo.js';
 
 const STOP_REASONS = {
   direct: 'La liaison directe suffit : aucun relais necessaire.',
@@ -34,6 +35,12 @@ export default function ChainPanel({ chain, onLocate }) {
   const label = (i) =>
     i === 0 ? 'TX' : i === nodes.length - 1 ? 'RX' : `R${i}`;
 
+  // Cap exact a viser depuis chaque extremite : TX ne regarde qu en avant
+  // (vers le premier noeud du trajet), RX qu en arriere (vers le dernier).
+  // Calcule sur le grand cercle, pas une simple reciproque a 180 deg.
+  const capTx = nodes.length > 1 ? bearing(nodes[0], nodes[1]) : NaN;
+  const capRx = nodes.length > 1 ? bearing(nodes[nodes.length - 1], nodes[nodes.length - 2]) : NaN;
+
   return (
     <div className="space-y-3">
       <div className={`rounded-lg border px-3 py-2.5 ${tone}`}>
@@ -56,12 +63,30 @@ export default function ChainPanel({ chain, onLocate }) {
         </p>
       </div>
 
+      {(Number.isFinite(capTx) || Number.isFinite(capRx)) && (
+        <div className="flex flex-wrap gap-2">
+          {Number.isFinite(capTx) && (
+            <div className="flex flex-1 items-center justify-between rounded-lg border border-ink-500/70 bg-ink-900/50 px-2.5 py-2">
+              <span className="text-[11px] text-zinc-500">Cap antenne TX</span>
+              <span className="font-mono text-[13px] font-semibold text-zinc-200">{formatBearing(capTx)}</span>
+            </div>
+          )}
+          {Number.isFinite(capRx) && (
+            <div className="flex flex-1 items-center justify-between rounded-lg border border-ink-500/70 bg-ink-900/50 px-2.5 py-2">
+              <span className="text-[11px] text-zinc-500">Cap antenne RX</span>
+              <span className="font-mono text-[13px] font-semibold text-zinc-200">{formatBearing(capRx)}</span>
+            </div>
+          )}
+        </div>
+      )}
+
       {/* Le trajet, bond par bond */}
       <div className="overflow-hidden rounded-lg border border-ink-500/70">
         <table className="w-full text-[11px]">
           <thead>
             <tr className="bg-ink-900/60 text-left text-[10px] uppercase tracking-wide text-zinc-500">
               <th className="px-2 py-1.5 font-medium">Bond</th>
+              <th className="px-2 py-1.5 text-right font-medium">Cap</th>
               <th className="px-2 py-1.5 text-right font-medium">Distance</th>
               <th className="px-2 py-1.5 text-right font-medium">Vegetation</th>
               <th className="px-2 py-1.5 text-right font-medium">Fresnel</th>
@@ -73,6 +98,9 @@ export default function ChainPanel({ chain, onLocate }) {
               <tr key={i} className="border-t border-ink-500/50">
                 <td className="px-2 py-1.5 font-mono text-zinc-300">
                   {label(i)} → {label(i + 1)}
+                </td>
+                <td className="px-2 py-1.5 text-right font-mono text-zinc-400" title="Cap depuis le premier noeud du bond">
+                  {formatBearing(bearing(nodes[i], nodes[i + 1]))}
                 </td>
                 <td className="px-2 py-1.5 text-right font-mono text-zinc-400">
                   {h ? km(h.distM) : '-'}
@@ -96,7 +124,8 @@ export default function ChainPanel({ chain, onLocate }) {
         </table>
       </div>
 
-      {/* Les relais eux-memes */}
+      {/* Les relais eux-memes. Un relais dirige a besoin des deux caps : vers
+          le noeud precedent et vers le suivant. */}
       {relays > 0 && (
         <div className="space-y-1">
           {nodes.map((n, i) =>
@@ -105,7 +134,7 @@ export default function ChainPanel({ chain, onLocate }) {
                 key={i}
                 type="button"
                 onClick={() => onLocate?.(n)}
-                className="flex w-full items-center justify-between gap-2 rounded-md border border-ink-500/60 bg-ink-900/40 px-2.5 py-1.5 text-left transition hover:border-ink-500 hover:bg-ink-600/40"
+                className="flex w-full flex-wrap items-center justify-between gap-x-3 gap-y-1 rounded-md border border-ink-500/60 bg-ink-900/40 px-2.5 py-1.5 text-left transition hover:border-ink-500 hover:bg-ink-600/40"
               >
                 <span className="flex items-center gap-2">
                   <span className="grid h-5 w-6 place-items-center rounded bg-emerald-600 font-mono text-[10px] font-semibold text-white">
@@ -114,9 +143,13 @@ export default function ChainPanel({ chain, onLocate }) {
                   <span className="font-mono text-[11px] text-zinc-300">
                     {n.lat.toFixed(5)}, {n.lon.toFixed(5)}
                   </span>
+                  <span className="font-mono text-[11px] text-zinc-500">
+                    sol {n.elev?.toFixed(0)} m · mat {n.height} m
+                  </span>
                 </span>
                 <span className="font-mono text-[11px] text-zinc-500">
-                  sol {n.elev?.toFixed(0)} m · mat {n.height} m
+                  cap ← {formatBearing(bearing(n, nodes[i - 1]))} · cap →{' '}
+                  {formatBearing(bearing(n, nodes[i + 1]))}
                 </span>
               </button>
             ) : null
@@ -146,7 +179,8 @@ export default function ChainPanel({ chain, onLocate }) {
         Chaque relais est insere dans le bond le plus faible, puis le calcul recommence. Un relais
         qui n ameliorerait pas ce maillon est refuse : la chaine s arrete alors plutot que de
         s allonger sans effet. Les relais sont cherches dans le corridor deja telecharge, donc sans
-        requete supplementaire.
+        requete supplementaire. Les caps sont des azimuts geographiques (nord vrai), calcules sur
+        le grand cercle : corrigez de la declinaison magnetique locale pour une boussole classique.
       </p>
     </div>
   );

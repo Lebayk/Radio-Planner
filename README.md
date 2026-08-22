@@ -408,6 +408,42 @@ LoRa conserve le profil — ce sont des réglages firmware, pas du matériel.
 Ajouter un modèle se fait en une entrée dans `DEVICES`, dans
 [`src/lib/radio.js`](src/lib/radio.js).
 
+## Cap d'antenne
+
+Chaque site affiche le **cap exact** (azimut, 0–360°) à viser pour pointer une
+antenne directionnelle vers l'autre extrémité du bond : TX vers RX en liaison
+directe, TX vers le premier relais et RX vers le dernier s'il y a une chaîne,
+et chaque relais intermédiaire vers ses deux voisins s'il est lui-même
+directionnel.
+
+Calculé par [`bearing()`](src/lib/geo.js) — un cap **orthodromique exact** sur
+le grand cercle, pas une approximation plane ni une simple réciproque à 180° :
+vérifié numériquement, l'écart à 180° entre un cap et son retour correspond à
+l'excès sphérique réel, pas à une erreur d'arrondi. Affiché en degrés avec le
+point cardinal le plus proche sur 16 directions (`134° (SE)`), avant même le
+premier balayage (case « Cap TX vers RX »), dans le résumé d'un relais unique,
+dans le tableau et la liste de la chaîne de relais, en infobulle sur chaque
+marqueur de la carte, et dans les trois exports.
+
+**C'est un azimut géographique (nord vrai), pas magnétique.** Une boussole
+lit le nord magnétique, qui diffère du nord vrai de plusieurs degrés selon le
+lieu (déclinaison) : corrigez-en, ou visez avec le mode « nord vrai » d'un GPS
+ou d'une boussole de téléphone. L'interface et les exports le rappellent à
+chaque affichage du cap.
+
+Un vrai bug trouvé et corrigé en vérifiant le rendu réel du PDF plutôt que la
+seule présence du texte : les flèches Unicode (`←` `→`) utilisées pour noter
+« cap vers » dans le rapport forçaient jsPDF à basculer ces lignes en
+encodage Identity-H (2 octets par caractère), un mode que les polices
+standard de PDF (Helvetica Type 1) ne savent pas dessiner — ces flèches
+n'ont aucun glyphe dans ces polices. Remplacées par du texte simple
+(« cap vers TX », « cap vers RX »), en `us-ascii` intégral, sans ambiguïté
+d'encodage. Le signe degré (`°`), lui, est resté : vérifié par inspection
+directe de l'octet écrit dans le flux PDF (`0xB0`, exactement le point
+WinAnsi du signe degré) plutôt que sur une extraction de texte naïve — lire
+un PDF binaire comme de l'UTF-8 corrompt n'importe quel octet non-ASCII
+valide sans que le PDF réel soit en cause.
+
 ## Sorties
 
 - **Carte** — fonds OpenTopoMap, Plan IGN, photo aérienne IGN, OSM. Carte de

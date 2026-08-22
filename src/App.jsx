@@ -16,7 +16,7 @@ import { Section, Checkbox, Banner, Progress, Spinner, MarginChip, DropdownMenu 
 import { loadConfig, saveConfig, resetConfig } from './lib/storage.js';
 import { buildGridSpec, buildMask, maskedPoints, sampleGrid } from './lib/dem.js';
 import { fetchElevations, estimateRequests, cacheStats, clearCache, PROVIDER_BY_ID } from './lib/elevation.js';
-import { haversine } from './lib/geo.js';
+import { haversine, bearing } from './lib/geo.js';
 import { DEVICE_BY_ID, PRESET_BY_ID } from './lib/radio.js';
 import { analyzeSite, heightSweep, analyzeDirect, profileFromGrid, clutterProfiles, getHopProfiles, pinProfiles } from './lib/analysis.js';
 import { fetchClutter, estimateClutter, gridBbox, clutterSummary } from './lib/clutter.js';
@@ -84,6 +84,9 @@ export default function App() {
   const txSite = useMemo(() => ({ ...tx, elev: elev.tx }), [tx, elev.tx]);
   const rxSite = useMemo(() => ({ ...rx, elev: elev.rx }), [rx, elev.rx]);
   const linkLength = useMemo(() => haversine(tx, rx), [tx.lat, tx.lon, rx.lat, rx.lon]);
+  // Cap direct TX -> RX : reperage utile des la saisie des deux sites, avant
+  // meme de savoir si un relais sera necessaire.
+  const linkBearing = useMemo(() => bearing(tx, rx), [tx.lat, tx.lon, rx.lat, rx.lon]);
 
   const patch = useCallback((key, value) => setConfig((c) => ({ ...c, [key]: value })), []);
 
@@ -860,6 +863,7 @@ export default function App() {
           onProviderChange={(v) => patch('provider', v)}
           estimate={estimate}
           linkLength={linkLength}
+          linkBearing={linkBearing}
         />
       </Section>
 
@@ -932,7 +936,7 @@ export default function App() {
           <p className="mb-3 font-mono text-[11px] text-zinc-500">
             {manual.lat.toFixed(5)}, {manual.lon.toFixed(5)} - altitude {manual.elev?.toFixed(0)} m
           </p>
-          <LinkSummary result={manual.result} radio={radio} direct={direct} />
+          <LinkSummary result={manual.result} radio={radio} direct={direct} tx={txSite} rx={rxSite} relay={manual} />
         </div>
       )}
 
@@ -999,7 +1003,7 @@ export default function App() {
                   ))}
                 </div>
               </div>
-              <LinkSummary result={detail.result} radio={radio} direct={direct} />
+              <LinkSummary result={detail.result} radio={radio} direct={direct} tx={txSite} rx={rxSite} relay={detail.site} />
             </div>
           )}
         </>
