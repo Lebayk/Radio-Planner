@@ -22,6 +22,7 @@ import { analyzeSite, heightSweep, analyzeDirect, profileFromGrid, clutterProfil
 import { fetchClutter, estimateClutter, gridBbox, clutterSummary } from './lib/clutter.js';
 import { loadRoads, nearestRoad, bboxAround, clearRoadCache } from './lib/osm.js';
 import { exportGpx, exportKml, exportPdf, preloadPdf } from './lib/exporters.js';
+import { renderCoverageMapPNG } from './lib/mapRender.js';
 import {
   buildRays,
   computeCoverage,
@@ -76,6 +77,8 @@ export default function App() {
   const abortRef = useRef(null);
   const chartsRef = useRef({});
   const exportBtnRef = useRef(null);
+  const coverRef = useRef(null);
+  coverRef.current = cover;
 
   const { tx, rx, radio, search, provider } = config;
   const txSite = useMemo(() => ({ ...tx, elev: elev.tx }), [tx, elev.tx]);
@@ -603,10 +606,28 @@ export default function App() {
         return null;
       }
     };
+    // Carte schematique, dessinee a la main : la carte Leaflet reelle ne peut
+    // pas etre capturee (tuiles sans en-tete CORS -> canvas souille), mais on
+    // dispose deja de toute la geometrie du calcul pour en reconstruire une.
+    const coverageMap = (() => {
+      try {
+        const d = exportDataRef.current;
+        return renderCoverageMapPNG({
+          tx: d.tx,
+          rx: d.rx,
+          chain: d.chain,
+          relay: d.relay,
+          cover: coverRef.current,
+        });
+      } catch {
+        return null;
+      }
+    })();
     exportPdf(exportDataRef.current, {
       profile1: img('p1'),
       profile2: img('p2'),
       heights: img('h'),
+      coverageMap,
     })
       .then((h) => keep('pdf', h))
       .catch((e) => {

@@ -518,21 +518,38 @@ export async function exportPdf(data, images = {}) {
     line(5);
   }
 
-  const addImage = (dataUrl, title) => {
+  const addImage = (dataUrl, title, aspect = 0.42) => {
     if (!dataUrl) return;
-    if (y > 190) {
+    const w = W - 2 * M;
+    const h = w * aspect;
+    // +12 mm : marge pour le titre que `heading` va inserer juste apres.
+    if (y + h + 12 > 275) {
       doc.addPage();
       y = M;
     }
     heading(title, 11);
-    const w = W - 2 * M;
-    const h = w * 0.42;
-    // Sans compression, trois graphiques suffisent a produire un PDF de
+    // Sans compression, quatre images suffisent a produire un PDF de
     // plusieurs mega-octets.
     doc.addImage(dataUrl, 'PNG', M, y, w, h, undefined, 'FAST');
     y += h;
     line(4);
   };
+
+  // La carte en premier : c est la vue d ensemble, avant le detail des
+  // profils bond par bond. Aspect 900/1400 = celui du canvas dessine.
+  addImage(images.coverageMap, 'Carte - liaison et portee du relais', 900 / 1400);
+  if (images.coverageMap) {
+    doc.setFontSize(8);
+    doc.setTextColor(110, 110, 110);
+    doc.text(
+      'Carte schematique (sans fond cartographique) : distances et positions exactes, relief non represente ici.',
+      M,
+      y
+    );
+    doc.setFontSize(9);
+    doc.setTextColor(40, 40, 40);
+    line(5);
+  }
 
   addImage(images.profile1, 'Profil bond 1 : TX -> relais');
   addImage(images.profile2, 'Profil bond 2 : relais -> RX');
