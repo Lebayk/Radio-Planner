@@ -14,7 +14,7 @@ import ChainPanel from './components/ChainPanel.jsx';
 import { Section, Checkbox, Banner, Progress, Spinner, MarginChip, DropdownMenu } from './components/ui.jsx';
 
 import { loadConfig, saveConfig, resetConfig } from './lib/storage.js';
-import { buildGridSpec, buildMask, maskedPoints, sampleGrid } from './lib/dem.js';
+import { buildGridSpec, buildMask, maskedPoints, sampleGrid, minFeasibleStep, maxFeasibleRadius } from './lib/dem.js';
 import { fetchElevations, estimateRequests, cacheStats, clearCache, PROVIDER_BY_ID } from './lib/elevation.js';
 import { haversine, bearing } from './lib/geo.js';
 import { DEVICE_BY_ID, PRESET_BY_ID } from './lib/radio.js';
@@ -199,7 +199,23 @@ export default function App() {
   const estimate = useMemo(() => {
     try {
       const grid = buildGridSpec(tx, rx, search.radius, search.step);
-      if (grid.nx * grid.ny > MAX_CELLS) return { points: Infinity, cached: 0, requests: Infinity, tooBig: true, grid };
+      if (grid.nx * grid.ny > MAX_CELLS) {
+        // Plutot que de se contenter d un refus, on calcule tout de suite de
+        // combien il faudrait relacher le pas ou le rayon : l utilisateur
+        // corrige d un clic au lieu de tatonner par essais-erreurs.
+        return {
+          points: Infinity,
+          cached: 0,
+          requests: Infinity,
+          tooBig: true,
+          grid,
+          suggestedStep: Math.ceil(minFeasibleStep(tx, rx, search.radius, MAX_CELLS, search.step) / 5) * 5,
+          suggestedRadius: (() => {
+            const r = maxFeasibleRadius(tx, rx, search.step, MAX_CELLS, search.radius);
+            return r === null ? null : Math.max(50, Math.floor(r / 10) * 10);
+          })(),
+        };
+      }
       const mask = buildMask(grid, tx, rx);
       const pts = maskedPoints(grid, mask);
       const { missing, requests, seconds } = estimateRequests(provider, pts);

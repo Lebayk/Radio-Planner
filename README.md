@@ -360,6 +360,25 @@ Volume typique : liaison de 5,3 km, rayon 500 m, pas 50 m → 2 864 points,
 15 requêtes IGN, environ 4 secondes. Le calcul des 2 400 mailles candidates
 prend ensuite ~60 ms dans le Web Worker.
 
+### Zone trop vaste
+
+La grille MNT est bornée à 400 000 mailles (`MAX_CELLS` dans
+[`App.jsx`](src/App.jsx)) — pas une limite réseau, mais la taille de la boîte
+englobante TX-RX-rayon une fois découpée au pas demandé : un rayon large
+combiné à un pas fin (ex. 3 km de rayon, pas de 10 m, sur une liaison de
+150 km) la fait exploser bien avant que le nombre de requêtes ne pose
+problème.
+
+Le message d'erreur ne se contente plus de suggérer d'augmenter le pas ou de
+réduire le rayon : [`minFeasibleStep()` et `maxFeasibleRadius()`](src/lib/dem.js)
+calculent par recherche binaire sur `buildGridSpec()` la plus petite
+correction qui fait tenir la grille, affichée en bannière dans le panneau de
+recherche avec un bouton « Passer le pas à X m » (et « Réduire le rayon à
+X m » quand cette voie seule suffit — pas toujours le cas : à pas fixe très
+fin sur une liaison déjà longue, même un rayon nul peut ne pas suffire, et
+`maxFeasibleRadius()` renvoie alors `null` plutôt que d'afficher un correctif
+qui ne corrigerait rien).
+
 ---
 
 ## Saisie des deux sites

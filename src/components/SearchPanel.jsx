@@ -89,6 +89,32 @@ export default function SearchPanel({ search, onChange, provider, onProviderChan
         </Field>
       </div>
 
+      {estimate.tooBig && (
+        <Banner tone="error" title={t('search.tooBigTitle')}>
+          <p>{t('search.tooBigMsg')}</p>
+          <div className="mt-1.5 flex flex-wrap gap-1.5">
+            {Number.isFinite(estimate.suggestedStep) && (
+              <button
+                type="button"
+                className="rounded border border-rose-500/40 bg-rose-500/15 px-2 py-1 text-[11px] font-medium text-rose-100 transition hover:bg-rose-500/25"
+                onClick={() => set({ step: estimate.suggestedStep })}
+              >
+                {t('search.tooBigFixStep', { step: estimate.suggestedStep })}
+              </button>
+            )}
+            {Number.isFinite(estimate.suggestedRadius) && (
+              <button
+                type="button"
+                className="rounded border border-rose-500/40 bg-rose-500/15 px-2 py-1 text-[11px] font-medium text-rose-100 transition hover:bg-rose-500/25"
+                onClick={() => set({ radius: estimate.suggestedRadius })}
+              >
+                {t('search.tooBigFixRadius', { radius: estimate.suggestedRadius })}
+              </button>
+            )}
+          </div>
+        </Banner>
+      )}
+
       <Field label={t('search.maxRelays')} hint={t('search.maxRelaysHint')}>
         <NumberInput
           value={search.maxRelays}

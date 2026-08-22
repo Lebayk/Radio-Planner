@@ -34,6 +34,50 @@ export function buildGridSpec(tx, rx, radius, step) {
   return { lat0: latMin, lon0: lonMin, dLat, dLon, nx, ny, step, radius };
 }
 
+const cellCount = (tx, rx, radius, step) => {
+  const g = buildGridSpec(tx, rx, radius, step);
+  return g.nx * g.ny;
+};
+
+/**
+ * Plus petit pas (m) qui fait tenir la grille sous `maxCells`, a rayon fixe.
+ *
+ * `nx*ny` decroit avec le pas (un pas plus grossier vide la grille) : la
+ * recherche binaire est donc bien fondee. Utilise pour proposer une
+ * correction en un clic quand la zone demandee depasse la limite, plutot que
+ * de se contenter de dire a l utilisateur d augmenter le pas lui-meme.
+ */
+export function minFeasibleStep(tx, rx, radius, maxCells, currentStep) {
+  let lo = Math.max(1, currentStep); // suppose infaisable : c est pour ca qu on cherche
+  let hi = Math.max(lo * 2, 10);
+  while (cellCount(tx, rx, radius, hi) > maxCells && hi < 200000) hi *= 2;
+  for (let i = 0; i < 30 && hi - lo > 0.5; i++) {
+    const mid = (lo + hi) / 2;
+    if (cellCount(tx, rx, radius, mid) > maxCells) lo = mid;
+    else hi = mid;
+  }
+  return hi;
+}
+
+/**
+ * Plus grand rayon (m) qui fait tenir la grille sous `maxCells`, a pas fixe.
+ *
+ * Symetrique de `minFeasibleStep` : `nx*ny` croit avec le rayon. Retourne
+ * `null` si meme un rayon nul ne suffit pas - alors seul un pas plus grossier
+ * peut resoudre le probleme, pas une reduction de rayon.
+ */
+export function maxFeasibleRadius(tx, rx, step, maxCells, currentRadius) {
+  if (cellCount(tx, rx, 0, step) > maxCells) return null;
+  let lo = 0;
+  let hi = Math.max(currentRadius, 1);
+  for (let i = 0; i < 30 && hi - lo > 0.5; i++) {
+    const mid = (lo + hi) / 2;
+    if (cellCount(tx, rx, mid, step) > maxCells) hi = mid;
+    else lo = mid;
+  }
+  return lo;
+}
+
 /**
  * Nombre d echantillons le long d un trajet : deux fois la finesse du MNT,
  * borne entre 32 et 256.

@@ -298,6 +298,13 @@ const STRINGS = {
   'search.alreadyCached': ['Deja en cache', 'Already cached'],
   'search.networkRequests': ['Requetes reseau', 'Network requests'],
   'search.wideAreaTitle': ['Zone tres large', 'Very large area'],
+  'search.tooBigTitle': ['Zone trop vaste pour ce pas', 'Area too large for this step'],
+  'search.tooBigMsg': [
+    'La grille depasserait la limite de memoire du navigateur. Corrigez d un clic :',
+    'The grid would exceed the browser memory limit. Fix it in one click:',
+  ],
+  'search.tooBigFixStep': ['Passer le pas a {{step}} m', 'Set step to {{step}} m'],
+  'search.tooBigFixRadius': ['Reduire le rayon a {{radius}} m', 'Reduce radius to {{radius}} m'],
   'search.wideAreaMsg': [
     'Le telechargement va prendre plusieurs minutes et solliciter lourdement un service gratuit. ' +
       'Reduisez le rayon ou augmentez le pas d echantillonnage.',
