@@ -1,0 +1,198 @@
+@import url('https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  :root {
+    color-scheme: dark;
+  }
+
+  html,
+  body,
+  #root {
+    height: 100%;
+  }
+
+  body {
+    @apply bg-ink-900 text-zinc-200 font-sans antialiased;
+    overscroll-behavior: none;
+  }
+
+  /* Barres de defilement discretes, cohérentes avec le theme sombre. */
+  * {
+    scrollbar-width: thin;
+    scrollbar-color: #3f4658 transparent;
+  }
+  *::-webkit-scrollbar {
+    width: 9px;
+    height: 9px;
+  }
+  *::-webkit-scrollbar-thumb {
+    background: #3f4658;
+    border-radius: 6px;
+  }
+  *::-webkit-scrollbar-track {
+    background: transparent;
+  }
+
+  input[type='number']::-webkit-outer-spin-button,
+  input[type='number']::-webkit-inner-spin-button {
+    -webkit-appearance: none;
+    margin: 0;
+  }
+  input[type='number'] {
+    -moz-appearance: textfield;
+  }
+}
+
+@layer components {
+  .card {
+    @apply rounded-xl border border-ink-500/70 bg-ink-800/70 backdrop-blur-sm;
+  }
+
+  .card-title {
+    @apply flex items-center gap-2 px-4 py-3 text-[13px] font-semibold uppercase tracking-wider text-zinc-400;
+  }
+
+  .field-label {
+    @apply mb-1 block text-[11px] font-medium uppercase tracking-wide text-zinc-500;
+  }
+
+  .input {
+    @apply w-full rounded-lg border border-ink-500 bg-ink-900/80 px-2.5 py-1.5 text-sm text-zinc-100
+           outline-none transition placeholder:text-zinc-600
+           focus:border-sky-500/70 focus:ring-2 focus:ring-sky-500/20;
+  }
+
+  .input-invalid {
+    @apply border-rose-500/70 focus:border-rose-500 focus:ring-rose-500/20;
+  }
+
+  .btn {
+    @apply inline-flex items-center justify-center gap-2 rounded-lg border px-3 py-1.5 text-sm font-medium
+           transition disabled:cursor-not-allowed disabled:opacity-40;
+  }
+
+  .btn-primary {
+    @apply btn border-sky-500 bg-sky-600 text-white hover:bg-sky-500 active:bg-sky-700;
+  }
+
+  .btn-ghost {
+    @apply btn border-ink-500 bg-ink-700/60 text-zinc-300 hover:border-ink-500 hover:bg-ink-600;
+  }
+
+  .btn-danger {
+    @apply btn border-rose-700/60 bg-rose-900/40 text-rose-200 hover:bg-rose-900/70;
+  }
+
+  .chip {
+    @apply inline-flex items-center gap-1 rounded-md px-1.5 py-0.5 font-mono text-[11px];
+  }
+
+  .tabular {
+    font-variant-numeric: tabular-nums;
+  }
+}
+
+/* --- Leaflet : adaptation au theme sombre ------------------------------- */
+
+.leaflet-container {
+  background: #0b0e14;
+  font-family: inherit;
+}
+
+.leaflet-control-attribution {
+  background: rgba(11, 14, 20, 0.82) !important;
+  color: #71717a !important;
+  font-size: 10px !important;
+}
+.leaflet-control-attribution a {
+  color: #a1a1aa !important;
+}
+
+.leaflet-bar a,
+.leaflet-bar a:hover {
+  background: #171c28;
+  color: #d4d4d8;
+  border-bottom-color: #2a3345;
+}
+.leaflet-bar a:hover {
+  background: #1f2634;
+}
+
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+  background: #11151f;
+  color: #e4e4e7;
+  border: 1px solid #2a3345;
+  box-shadow: 0 12px 32px rgba(0, 0, 0, 0.55);
+}
+.leaflet-popup-content {
+  margin: 10px 12px;
+  font-size: 12px;
+  line-height: 1.55;
+}
+.leaflet-popup-close-button {
+  color: #71717a !important;
+}
+
+.heat-overlay {
+  image-rendering: auto;
+  mix-blend-mode: screen;
+}
+
+/* Marqueurs personnalises (divIcon) */
+.site-marker {
+  display: grid;
+  place-items: center;
+  width: 26px;
+  height: 26px;
+  border-radius: 50%;
+  border: 2px solid rgba(255, 255, 255, 0.9);
+  box-shadow: 0 3px 10px rgba(0, 0, 0, 0.6);
+  font-size: 10px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+  color: #fff;
+}
+.site-marker--tx,
+.site-marker--rx {
+  background: #2563eb;
+}
+.site-marker--relay {
+  background: #16a34a;
+  width: 30px;
+  height: 30px;
+  font-size: 9px;
+}
+.site-marker--manual {
+  background: #a855f7;
+}
+
+.candidate-dot {
+  border-radius: 50%;
+  border: 1px solid rgba(255, 255, 255, 0.55);
+  box-shadow: 0 1px 4px rgba(0, 0, 0, 0.5);
+}
+
+/* Animation de la barre de progression */
+@keyframes shimmer {
+  0% {
+    background-position: -200% 0;
+  }
+  100% {
+    background-position: 200% 0;
+  }
+}
+.progress-fill {
+  background-image: linear-gradient(
+    90deg,
+    rgba(56, 189, 248, 0.9) 0%,
+    rgba(125, 211, 252, 1) 50%,
+    rgba(56, 189, 248, 0.9) 100%
+  );
+  background-size: 200% 100%;
+  animation: shimmer 1.8s linear infinite;
+}
