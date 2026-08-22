@@ -301,7 +301,14 @@ export default function App() {
                 total,
               }),
           });
-          if (clutter.stats?.failed) {
+          if (clutter.stats?.unavailable) {
+            setWarnings((w) => [
+              ...w,
+              'Aucune instance OpenStreetMap Overpass joignable : la vegetation et le bati ne ' +
+                'sont pas pris en compte, et la portee est donc surestimee. Le relief, lui, ' +
+                'reste exact. Reessayez dans quelques minutes.',
+            ]);
+          } else if (clutter.stats?.failed) {
             setWarnings((w) => [
               ...w,
               `${clutter.stats.failed} tuile(s) de couverture du sol sur ${clutter.stats.tiles} ` +

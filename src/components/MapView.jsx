@@ -1,4 +1,4 @@
-import React, { useEffect, useMemo, useRef } from 'react';
+import React, { useCallback, useEffect, useMemo, useRef } from 'react';
 import L from 'leaflet';
 import { marginColor, heatRgb } from '../lib/colors.js';
 import { destination, bearing } from '../lib/geo.js';
@@ -363,18 +363,38 @@ export default function MapView({
     });
   }, [candidates, showCandidates]);
 
+  /**
+   * Bornes de tout ce qui constitue la liaison.
+   *
+   * Ne cadrer que sur TX, RX et le relais unique laissait les relais de la
+   * chaine hors du volet : ils etaient bien dessines, simplement au-dessus du
+   * cadre visible.
+   */
+  const linkBounds = useCallback(() => {
+    const b = L.latLngBounds([tx.lat, tx.lon], [rx.lat, rx.lon]);
+    if (relay) b.extend([relay.lat, relay.lon]);
+    if (manual) b.extend([manual.lat, manual.lon]);
+    for (const n of chain?.nodes ?? []) b.extend([n.lat, n.lon]);
+    return b;
+  }, [tx, rx, relay, manual, chain]);
+
+  /** Recadrage a la demande : le filet de securite quand tout a bouge. */
+  const recenter = useCallback(() => {
+    const map = mapRef.current;
+    if (!map || !layersRef.current?.alive) return;
+    map.fitBounds(linkBounds(), { padding: [45, 45], maxZoom: 16, animate: false });
+  }, [linkBounds]);
+
   // --- Recadrage ------------------------------------------------------------
   useEffect(() => {
     const map = mapRef.current;
     if (!map || !layersRef.current?.alive || !focus) return;
     if (focus.type === 'fit') {
-      const b = L.latLngBounds([tx.lat, tx.lon], [rx.lat, rx.lon]);
-      if (relay) b.extend([relay.lat, relay.lon]);
-      map.fitBounds(b, { padding: [70, 70], maxZoom: 16 });
+      map.fitBounds(linkBounds(), { padding: [45, 45], maxZoom: 16, animate: false });
     } else if (focus.type === 'bounds' && focus.points?.length) {
       const b = L.latLngBounds(focus.points);
       b.extend([relay?.lat ?? tx.lat, relay?.lon ?? tx.lon]);
-      map.fitBounds(b, { padding: [40, 40] });
+      map.fitBounds(b, { padding: [40, 40], animate: false });
     } else if (focus.type === 'point') {
       map.setView([focus.lat, focus.lon], Math.max(map.getZoom(), 15), { animate: true });
     }
@@ -413,12 +433,15 @@ export default function MapView({
         ))}
       </div>
 
+      {/* Commandes de la carte, empilees sous le controle de zoom. Les
+          positionner une a une en absolu se payait a chaque ajout. */}
+      <div className="absolute left-[10px] top-[84px] z-[1001] flex flex-col items-start gap-1">
       {/* Placement des deux sites : le geste le plus courant, donc accessible
           directement sur la carte et pas seulement depuis le panneau. */}
       <button
         type="button"
         onClick={onStartPickBoth}
-        className={`absolute left-[10px] top-[84px] z-[1001] flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-[11px] font-medium shadow-lg backdrop-blur transition ${
+        className={`flex items-center gap-1.5 rounded-md border px-2 py-1.5 text-[11px] font-medium shadow-lg backdrop-blur transition ${
           pickMode === 'both'
             ? 'border-sky-400 bg-sky-600 text-white'
             : 'border-ink-500 bg-ink-800/90 text-zinc-300 hover:bg-ink-600 hover:text-zinc-100'
@@ -432,10 +455,25 @@ export default function MapView({
         {pickMode === 'both' ? 'Annuler' : 'Placer TX + RX'}
       </button>
 
+      {/* Recadrage : filet de securite permanent. Une chaine de relais peut
+          sortir du cadre initial, et rien n est plus deroutant qu un relais
+          calcule mais invisible. */}
+      <button
+        type="button"
+        onClick={recenter}
+        className="flex items-center gap-1.5 rounded-md border border-ink-500 bg-ink-800/90 px-2 py-1.5 text-[11px] font-medium text-zinc-300 shadow-lg backdrop-blur transition hover:bg-ink-600 hover:text-zinc-100"
+        title="Recadrer sur toute la liaison, relais compris"
+      >
+        <svg viewBox="0 0 24 24" className="h-3.5 w-3.5" fill="none" stroke="currentColor" strokeWidth="2.2">
+          <path d="M4 9V5a1 1 0 0 1 1-1h4M20 9V5a1 1 0 0 0-1-1h-4M4 15v4a1 1 0 0 0 1 1h4M20 15v4a1 1 0 0 1-1 1h-4" strokeLinecap="round" />
+        </svg>
+        Recadrer
+      </button>
+
       {/* Portee du relais : le calcul telecharge son propre relief, il reste
           donc explicite - mais la commande doit etre la ou l on regarde. */}
       {relay && (
-        <div className="absolute left-[10px] top-[122px] z-[1001] flex flex-col items-start gap-1">
+        <div className="flex flex-col items-start gap-1">
           <button
             type="button"
             onClick={coverage ? onToggleCoverage : onRunCoverage}
@@ -475,6 +513,8 @@ export default function MapView({
           )}
         </div>
       )}
+
+      </div>
 
       {pickMode && (
         <div className="pointer-events-none absolute left-1/2 top-3 z-[1001] -translate-x-1/2 rounded-full border border-sky-500/50 bg-sky-500/20 px-3 py-1.5 text-[11px] font-medium text-sky-100 shadow-lg backdrop-blur">

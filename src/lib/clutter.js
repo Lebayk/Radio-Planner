@@ -19,7 +19,7 @@
 
 import { gridLat, gridLon } from './dem.js';
 import { idbGet, idbPut } from './idb.js';
-import { overpassFetch } from './osm.js';
+import { overpassFetch, OverpassUnavailableError } from './osm.js';
 
 /**
  * Taille de tuile par couche, calee sur les volumes mesures.
@@ -293,16 +293,40 @@ export async function fetchClutter({ grid, buildingBbox, onProgress, signal }) {
   let fromCache = 0;
   let elements = 0;
 
+  let unavailable = false;
+
   const run = async (tiles, query, layer, deg) => {
     for (const t of tiles) {
       if (signal?.aborted) throw new DOMException('Annule', 'AbortError');
-      const res = await loadTile(layer, t, deg, query(t), {
-        signal,
-        // Overpass impose parfois une attente de plusieurs dizaines de
-        // secondes : la taire donnerait l impression d un blocage.
-        onWait: ({ ms }) =>
-          onProgress?.({ done, total, layer, waitingMs: ms }),
-      });
+      if (unavailable) {
+        // Le service est tombe : compter les tuiles restantes comme manquantes
+        // sans les demander. Insister ne ferait que remplir la console.
+        failed += tiles.length - tiles.indexOf(t);
+        done = total;
+        onProgress?.({ done, total, layer });
+        return;
+      }
+
+      let res;
+      try {
+        res = await loadTile(layer, t, deg, query(t), {
+          signal,
+          // Overpass impose parfois une attente de plusieurs dizaines de
+          // secondes : la taire donnerait l impression d un blocage.
+          onWait: ({ ms }) => onProgress?.({ done, total, layer, waitingMs: ms }),
+        });
+      } catch (err) {
+        if (err.name === 'AbortError') throw err;
+        if (err instanceof OverpassUnavailableError) {
+          unavailable = true;
+          failed += tiles.length - tiles.indexOf(t);
+          done = total;
+          onProgress?.({ done, total, layer });
+          return;
+        }
+        throw err;
+      }
+
       if (res.shapes) {
         elements += res.shapes.length;
         if (res.cached) fromCache++;
@@ -326,6 +350,7 @@ export async function fetchClutter({ grid, buildingBbox, onProgress, signal }) {
       failed,
       fromCache,
       elements,
+      unavailable,
       hasBuildings: bldTiles.length > 0,
     },
   };

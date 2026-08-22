@@ -27,12 +27,54 @@ export async function geocode(query, signal) {
 // Distance a la route la plus proche
 // ---------------------------------------------------------------------------
 
-// overpass.kumi.systems ne repond plus aux requetes navigateur (CORS) ;
-// overpass.osm.ch est un miroir officiel qui, lui, fonctionne.
+/**
+ * Instances Overpass, dans l ordre d essai.
+ *
+ * overpass.osm.ch est en tete parce que c est le seul miroir verifie comme
+ * renvoyant `Access-Control-Allow-Origin: *` depuis une origine deployee.
+ * L instance principale overpass-api.de est reguliment injoignable ou repond
+ * 406 sans en-tete CORS selon l origine appelante, ce qui bloque le navigateur.
+ * kumi.systems, private.coffee et osm.jp ne repondent pas non plus en CORS.
+ */
 export const ENDPOINTS = [
-  'https://overpass-api.de/api/interpreter',
   'https://overpass.osm.ch/api/interpreter',
+  'https://overpass-api.de/api/interpreter',
 ];
+
+/** Levee quand plus aucune instance n est joignable. */
+export class OverpassUnavailableError extends Error {
+  constructor() {
+    super('Aucune instance Overpass joignable');
+    this.name = 'OverpassUnavailableError';
+  }
+}
+
+/**
+ * Etat de sante par instance.
+ *
+ * Sans cela, une instance morte etait retentee pour chaque tuile : quatre
+ * tentatives sur deux instances, soit huit requetes vouees a l echec par
+ * tuile, plus les attentes. La console se remplissait d erreurs et le calcul
+ * s eternisait. Deux echecs consecutifs suffisent a l ecarter pour un moment.
+ */
+const DOWN_MS = 5 * 60 * 1000;
+const health = new Map();
+
+const isDown = (url) => (health.get(url)?.downUntil ?? 0) > Date.now();
+
+function noteFailure(url) {
+  const h = health.get(url) ?? { failures: 0, downUntil: 0 };
+  h.failures++;
+  if (h.failures >= 2) h.downUntil = Date.now() + DOWN_MS;
+  health.set(url, h);
+}
+
+const noteSuccess = (url) => health.set(url, { failures: 0, downUntil: 0 });
+
+/** Remet toutes les instances en service (changement de reseau, nouvel essai). */
+export function resetOverpassHealth() {
+  health.clear();
+}
 
 // ---------------------------------------------------------------------------
 // Transport Overpass partage
@@ -57,6 +99,9 @@ async function paceOverpass() {
 
 /** Delai annonce par Overpass avant qu un creneau se libere, en ms. */
 async function slotDelay(signal) {
+  // Seule overpass-api.de publie /api/status ; inutile de l interroger si on
+  // l a deja declaree hors service.
+  if (isDown('https://overpass-api.de/api/interpreter')) return 5000;
   try {
     const res = await fetch('https://overpass-api.de/api/status', { signal });
     const txt = await res.text();
@@ -78,10 +123,15 @@ async function slotDelay(signal) {
  * @param {function} onWait  ({ms, attempt}) => void, pour informer l utilisateur
  */
 export async function overpassFetch(query, { signal, onWait } = {}) {
-  for (let attempt = 0; attempt < 4; attempt++) {
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const usable = ENDPOINTS.filter((u) => !isDown(u));
+    // Toutes les instances sont hors service : inutile d insister tuile apres
+    // tuile, l appelant doit pouvoir abandonner proprement.
+    if (!usable.length) throw new OverpassUnavailableError();
+
     let rateLimited = false;
 
-    for (const url of ENDPOINTS) {
+    for (const url of usable) {
       if (signal?.aborted) throw new DOMException('Annule', 'AbortError');
       await paceOverpass();
       try {
@@ -92,18 +142,28 @@ export async function overpassFetch(query, { signal, onWait } = {}) {
           signal,
         });
         if (res.status === 429) {
+          // Quota atteint : l instance est vivante, on ne la penalise pas.
           rateLimited = true;
           continue;
         }
-        if (!res.ok) continue; // 504 et consorts : on tente le miroir
-        return await res.json();
+        if (!res.ok) {
+          // 406 sans en-tete CORS, 504, 5xx : l instance nous refuse.
+          noteFailure(url);
+          continue;
+        }
+        const json = await res.json();
+        noteSuccess(url);
+        return json;
       } catch (err) {
         if (err.name === 'AbortError') throw err;
+        // Erreur reseau ou blocage CORS : indiscernables cote client, et de
+        // toute facon aussi definitifs l un que l autre.
+        noteFailure(url);
       }
     }
 
-    // Les deux instances ont refuse : on attend le delai qu Overpass annonce
-    // lui-meme plutot qu une valeur arbitraire.
+    if (ENDPOINTS.every((u) => isDown(u))) throw new OverpassUnavailableError();
+
     const ms = rateLimited ? await slotDelay(signal) : 3000 * (attempt + 1);
     onWait?.({ ms, attempt });
     await napOverpass(ms);
@@ -135,7 +195,13 @@ export async function loadRoads(bbox, signal) {
     `way["highway"~"^(${HIGHWAYS})$"](${bbox.s},${bbox.w},${bbox.n},${bbox.e});` +
     `out geom;`;
 
-  const json = await overpassFetch(q, { signal });
+  let json;
+  try {
+    json = await overpassFetch(q, { signal });
+  } catch (err) {
+    if (err.name === 'AbortError') throw err;
+    return null; // distance aux routes : confort, jamais bloquant
+  }
   if (!json) return null;
   const ways = (json.elements || [])
     .filter((e) => Array.isArray(e.geometry) && e.geometry.length > 1)
