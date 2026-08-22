@@ -444,6 +444,30 @@ WinAnsi du signe degré) plutôt que sur une extraction de texte naïve — lire
 un PDF binaire comme de l'UTF-8 corrompt n'importe quel octet non-ASCII
 valide sans que le PDF réel soit en cause.
 
+Un second bug, plus grave, a été signalé par un utilisateur ayant vérifié le
+cap au terrain à la boussole : « ultra faux ». La cause n'était pas un
+calcul erroné de `bearing()` (revérifié indépendamment, exact au grand
+cercle), mais un **conflit d'affichage sur la carte**. Le classement des
+meilleurs emplacements et la chaîne de relais construite automatiquement
+raisonnent indépendamment l'un de l'autre — le premier site par site, la
+seconde sur l'ensemble du trajet — et retiennent presque toujours des
+emplacements différents, parfois à plus d'un kilomètre l'un de l'autre. Or
+dès qu'une chaîne existait (le cas par défaut après tout balayage), la carte
+n'affichait **que** son premier relais, et calculait le cap de TX/RX vers lui
+— alors que le panneau de résumé, juste à côté, affichait le cap vers le
+candidat sélectionné dans le classement, à un tout autre endroit. L'utilisateur
+lisait le cap d'un site en pointant sa boussole vers le marqueur d'un autre.
+
+Corrigé dans [`MapView.jsx`](src/components/MapView.jsx) : le candidat
+inspecté (sélectionné dans le classement, ou posé au clic) est désormais
+**toujours** dessiné sur la carte, dans une couleur distincte (marqueur
+ambre `C`) du vert de la chaîne, et ne se substitue jamais à elle. Quand les
+deux existent et diffèrent, l'infobulle de TX et de RX affiche les **deux**
+caps, étiquetés « cap chaîne » et « cap candidat », plutôt que de n'en
+montrer qu'un en silence. Vérifié en direct (survol programmatique des
+marqueurs) : les deux caps affichés sur la carte correspondent bien,
+séparément, au panneau « Chaîne de relais » et au panneau du site sélectionné.
+
 ## Sorties
 
 - **Carte** — fonds OpenTopoMap, Plan IGN, photo aérienne IGN, OSM. Carte de

@@ -170,6 +170,16 @@
 .site-marker--manual {
   background: #a855f7;
 }
+.site-marker--candidate {
+  /* Ambre : distinct du vert de la chaine et du violet du point force, pour
+     qu on ne confonde jamais le candidat inspecte avec un relais de la
+     chaine auto-construite quand les deux sont affiches ensemble. */
+  background: #f59e0b;
+  width: 28px;
+  height: 28px;
+  font-size: 9px;
+  border-width: 3px;
+}
 
 .candidate-dot {
   border-radius: 50%;

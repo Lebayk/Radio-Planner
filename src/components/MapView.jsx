@@ -27,13 +27,15 @@ const BASE_LAYERS = () => ({
   }),
 });
 
-const siteIcon = (kind, text) =>
-  L.divIcon({
+const siteIcon = (kind, text) => {
+  const size = kind === 'relay' ? 30 : kind === 'candidate' ? 28 : 26;
+  return L.divIcon({
     className: '',
     html: `<div class="site-marker site-marker--${kind}">${text}</div>`,
-    iconSize: kind === 'relay' ? [30, 30] : [26, 26],
-    iconAnchor: kind === 'relay' ? [15, 15] : [13, 13],
+    iconSize: [size, size],
+    iconAnchor: [size / 2, size / 2],
   });
+};
 
 /** Contour du corridor de recherche : capsule autour du segment TX-RX. */
 function corridorPolygon(tx, rx, radius, steps = 24) {
@@ -177,8 +179,8 @@ export default function MapView({
     const mk = (site, kind, label) => {
       const m = L.marker([site.lat, site.lon], {
         icon: siteIcon(kind, label),
-        draggable: kind !== 'relay' && kind !== 'manual',
-        zIndexOffset: kind === 'relay' ? 500 : 300,
+        draggable: kind !== 'relay' && kind !== 'manual' && kind !== 'candidate',
+        zIndexOffset: kind === 'relay' ? 500 : kind === 'candidate' ? 550 : 300,
       });
       m.on('dragend', (e) => {
         const ll = e.target.getLatLng();
@@ -187,33 +189,41 @@ export default function MapView({
       return m;
     };
 
-    // Quand une chaine est tracee, le relais unique et ses deux segments
-    // feraient doublon par-dessus.
     const chainDrawn = chain?.relays > 0;
+    // Le relais/candidat unique (choisi dans le classement, ou clique sur la
+    // carte) et le premier relais de la chaine auto-construite sont deux
+    // choses **differentes**, presque toujours a des endroits differents : le
+    // classement raisonne site par site, la chaine optimise l ensemble du
+    // trajet. Les confondre - en cachant l un derriere l autre - a deja
+    // induit en erreur un cap lu sur un site en regardant le marqueur d un
+    // autre. Les deux sont donc toujours dessines, distinctement.
+    const sameSpot =
+      relay && chainDrawn && Math.abs(relay.lat - chain.nodes[1].lat) < 1e-6 && Math.abs(relay.lon - chain.nodes[1].lon) < 1e-6;
 
-    // Cap exact a viser depuis TX et RX : vers le premier relais de la
-    // chaine s il y en a une, sinon vers le relais unique, sinon l un vers
-    // l autre en liaison directe.
-    const txTarget = chainDrawn ? chain.nodes[1] : relay || rx;
-    const rxTarget = chainDrawn ? chain.nodes[chain.nodes.length - 2] : relay || tx;
-    // Origine passee explicitement : txTarget et rxTarget pointent souvent
-    // vers le meme relais unique, un test d egalite de reference se serait
-    // trompe de sens pour l un des deux caps.
-    const capLine = (origin, target) =>
-      target ? `<br>cap ${formatBearing(bearing(origin, target))}` : '';
+    const capLine = (label, origin, target) =>
+      target ? `<br>cap ${label}${formatBearing(bearing(origin, target))}` : '';
 
-    mk(tx, 'tx', 'TX')
-      .bindTooltip(`${tx.name} (TX)${capLine(tx, txTarget)}`, { direction: 'top', offset: [0, -14] })
-      .addTo(markers);
-    mk(rx, 'rx', 'RX')
-      .bindTooltip(`${rx.name} (RX)${capLine(rx, rxTarget)}`, { direction: 'top', offset: [0, -14] })
-      .addTo(markers);
+    const txCaps =
+      relay && chainDrawn && !sameSpot
+        ? capLine('chaine ', tx, chain.nodes[1]) + capLine('candidat ', tx, relay)
+        : capLine('', tx, chainDrawn ? chain.nodes[1] : relay || rx);
+    const rxCaps =
+      relay && chainDrawn && !sameSpot
+        ? capLine('chaine ', rx, chain.nodes[chain.nodes.length - 2]) + capLine('candidat ', rx, relay)
+        : capLine('', rx, chainDrawn ? chain.nodes[chain.nodes.length - 2] : relay || tx);
 
-    if (relay && !chainDrawn) {
-      const m = mk(relay, 'relay', 'REL');
+    mk(tx, 'tx', 'TX').bindTooltip(`${tx.name} (TX)${txCaps}`, { direction: 'top', offset: [0, -14] }).addTo(markers);
+    mk(rx, 'rx', 'RX').bindTooltip(`${rx.name} (RX)${rxCaps}`, { direction: 'top', offset: [0, -14] }).addTo(markers);
+
+    if (relay) {
+      // Ambre et distinct du vert de la chaine des que les deux coexistent,
+      // pour qu on ne confonde jamais visuellement les deux marqueurs.
+      const kind = chainDrawn ? 'candidate' : 'relay';
+      const m = mk(relay, kind, chainDrawn ? 'C' : 'REL');
       m.bindTooltip(
-        `Relais - antenne ${relay.height} m<br>marge ${relay.margin?.toFixed(1) ?? '-'} dB` +
-          `<br>cap ← ${formatBearing(bearing(relay, tx))} · cap → ${formatBearing(bearing(relay, rx))}`,
+        `${chainDrawn ? 'Candidat inspecte (hors chaine)' : 'Relais'} - antenne ${relay.height} m` +
+          `<br>marge ${relay.margin?.toFixed(1) ?? '-'} dB` +
+          `<br>cap vers TX ${formatBearing(bearing(relay, tx))} · cap vers RX ${formatBearing(bearing(relay, rx))}`,
         { direction: 'top', offset: [0, -16] }
       ).addTo(markers);
 
