@@ -363,6 +363,219 @@ export async function exportXlsx(data) {
     sheets.push({ name: tt('xlsx.sheet.linkBudget'), rows: lb });
   }
 
+  // --- Formules : le bilan refait pas a pas, en formules vivantes ----------
+  //
+  // Chaque grandeur calculee est ecrite comme une vraie formule de tableur
+  // referencant les lignes d entree. Changer la frequence ou la puissance
+  // dans le classeur recalcule tout le bilan, sans repasser par l application.
+  if (result) {
+    const F = [];
+    const push = (label, b, c, unit, formula) => {
+      F.push([label, b, c, unit, formula ?? '']);
+      return F.length; // numero de ligne, en-tete comprise
+    };
+    const sec = (key) => push(tt(key), '', '', '', '');
+
+    F.push([
+      tt('xlsx.f.col.quantity'),
+      tt('link.hop1'),
+      tt('link.hop2'),
+      tt('xlsx.f.col.unit'),
+      tt('xlsx.f.col.formula'),
+    ]);
+
+    // Abscisse et hauteur de l arete dominante, relues sur les series : ce
+    // sont les entrees geometriques du calcul de diffraction.
+    const edgeOf = (hop) => {
+      const s = hop?.series;
+      const i = hop?.worstIdx ?? -1;
+      if (!s || i < 0 || i >= s.dist.length) return null;
+      return { d1: s.dist[i], h: s.terrain[i] - s.los[i] };
+    };
+    const e1 = edgeOf(result.hop1);
+    const e2 = edgeOf(result.hop2);
+
+    sec('xlsx.f.section.inputs');
+    const rFreq = push(tt('xlsx.f.freq'), num(radio.freq, 4), num(radio.freq, 4), 'MHz');
+    const rLambda = push(
+      tt('xlsx.f.lambda'),
+      { f: `299792458/(B${rFreq}*1000000)`, v: num(299792458 / (radio.freq * 1e6), 6) },
+      { f: `299792458/(C${rFreq}*1000000)`, v: num(299792458 / (radio.freq * 1e6), 6) },
+      'm',
+      'lambda = c / f'
+    );
+    const rDist = push(
+      tt('xlsx.f.dist'),
+      num(result.hop1.distM / 1000, 5),
+      num(result.hop2.distM / 1000, 5),
+      'km'
+    );
+    const rPower = push(tt('xlsx.f.txPower'), num(radio.power, 2), num(radio.relayPower, 2), 'dBm');
+    const rGa = push(tt('xlsx.f.gA'), num(tx.gain, 2), num(radio.relayGain, 2), 'dBi');
+    const rGb = push(tt('xlsx.f.gB'), num(radio.relayGain, 2), num(rx.gain, 2), 'dBi');
+    const rCable = push(tt('xlsx.f.cableLoss'), num(radio.cableLoss, 2), num(radio.cableLoss, 2), 'dB');
+    const rSens = push(tt('xlsx.f.sensitivity'), num(preset.sens, 2), num(preset.sens, 2), 'dBm');
+    const rK = push(tt('xlsx.f.kFactor'), num(4 / 3, 6), num(4 / 3, 6), '');
+    const rFoliage = push(
+      tt('xlsx.f.foliageDepth'),
+      num(result.hop1.foliageDepth, 2),
+      num(result.hop2.foliageDepth, 2),
+      'm'
+    );
+
+    sec('xlsx.f.section.obstacle');
+    const rD1 = push(
+      tt('xlsx.f.d1'),
+      e1 ? num(e1.d1, 5) : tt('xlsx.f.noEdge'),
+      e2 ? num(e2.d1, 5) : tt('xlsx.f.noEdge'),
+      'km'
+    );
+    const rD2 = push(
+      tt('xlsx.f.d2'),
+      e1 ? { f: `B${rDist}-B${rD1}`, v: num(result.hop1.distM / 1000 - e1.d1, 5) } : '',
+      e2 ? { f: `C${rDist}-C${rD1}`, v: num(result.hop2.distM / 1000 - e2.d1, 5) } : '',
+      'km',
+      'd2 = d - d1'
+    );
+    const rH = push(
+      tt('xlsx.f.obstacleH'),
+      e1 ? num(e1.h, 3) : '',
+      e2 ? num(e2.h, 3) : '',
+      'm'
+    );
+
+    sec('xlsx.f.section.geometry');
+    const bulge = (col) => `${col}${rD1}*${col}${rD2}/(12.75*${col}${rK})`;
+    push(
+      tt('xlsx.f.bulge'),
+      e1 ? { f: bulge('B'), v: num((e1.d1 * (result.hop1.distM / 1000 - e1.d1)) / (12.75 * (4 / 3)), 3) } : '',
+      e2 ? { f: bulge('C'), v: num((e2.d1 * (result.hop2.distM / 1000 - e2.d1)) / (12.75 * (4 / 3)), 3) } : '',
+      'm',
+      'b = d1*d2 / (12,75*k)'
+    );
+    const fresnel = (col) =>
+      `17.31*SQRT(${col}${rD1}*${col}${rD2}/((${col}${rFreq}/1000)*${col}${rDist}))`;
+    const fresnelVal = (hop, e) =>
+      e ? 17.31 * Math.sqrt((e.d1 * (hop.distM / 1000 - e.d1)) / ((radio.freq / 1000) * (hop.distM / 1000))) : null;
+    push(
+      tt('xlsx.f.fresnelR'),
+      e1 ? { f: fresnel('B'), v: num(fresnelVal(result.hop1, e1), 3) } : '',
+      e2 ? { f: fresnel('C'), v: num(fresnelVal(result.hop2, e2), 3) } : '',
+      'm',
+      'r1 = 17,31*RACINE(d1*d2 / (f_GHz*d))'
+    );
+    const vF = (col) =>
+      `${col}${rH}*SQRT(2*(${col}${rD1}*1000+${col}${rD2}*1000)/(${col}${rLambda}*${col}${rD1}*1000*${col}${rD2}*1000))`;
+    const rV = push(
+      tt('xlsx.f.vParam'),
+      e1 ? { f: vF('B'), v: num(result.hop1.v, 4) } : '',
+      e2 ? { f: vF('C'), v: num(result.hop2.v, 4) } : '',
+      '',
+      'v = h*RACINE(2*(d1+d2) / (lambda*d1*d2))'
+    );
+    const jvF = (col) =>
+      `IF(${col}${rV}<=-0.78,0,6.9+20*LOG10(SQRT((${col}${rV}-0.1)^2+1)+${col}${rV}-0.1))`;
+    const jv = (v) => (!Number.isFinite(v) || v <= -0.78 ? 0 : 6.9 + 20 * Math.log10(Math.sqrt((v - 0.1) ** 2 + 1) + v - 0.1));
+    push(
+      tt('xlsx.f.jv'),
+      e1 ? { f: jvF('B'), v: num(jv(result.hop1.v), 3) } : '',
+      e2 ? { f: jvF('C'), v: num(jv(result.hop2.v), 3) } : '',
+      'dB',
+      'J(v) = 6,9 + 20*LOG10(RACINE((v-0,1)^2+1) + v - 0,1)'
+    );
+
+    sec('xlsx.f.section.losses');
+    const rFspl = push(
+      tt('xlsx.f.fsplRow'),
+      { f: `20*LOG10(B${rDist})+20*LOG10(B${rFreq})+32.44`, v: num(result.hop1.fspl, 3) },
+      { f: `20*LOG10(C${rDist})+20*LOG10(C${rFreq})+32.44`, v: num(result.hop2.fspl, 3) },
+      'dB',
+      'FSPL = 20*LOG10(d_km) + 20*LOG10(f_MHz) + 32,44'
+    );
+    // La diffraction totale reste une valeur calculee : voir la note en bas de
+    // feuille, la construction de Deygout est recursive.
+    const rDiff = push(
+      tt('xlsx.f.diffTotal'),
+      num(result.hop1.diffraction, 3),
+      num(result.hop2.diffraction, 3),
+      'dB'
+    );
+    const folF = (col) =>
+      `IF(${col}${rFoliage}<=0,0,POWER(${col}${rFreq}/1000,0.284)*IF(MIN(${col}${rFoliage},400)<=14,` +
+      `0.45*MIN(${col}${rFoliage},400),1.33*POWER(MIN(${col}${rFoliage},400),0.588)))`;
+    const rFol = push(
+      tt('xlsx.f.foliageRow'),
+      { f: folF('B'), v: num(result.hop1.foliage, 3) },
+      { f: folF('C'), v: num(result.hop2.foliage, 3) },
+      'dB',
+      'L = f_GHz^0,284 * (0,45*d si d<=14 m, sinon 1,33*d^0,588)'
+    );
+
+    sec('xlsx.f.section.budget');
+    const rssiF = (col) =>
+      `${col}${rPower}+${col}${rGa}+${col}${rGb}-2*${col}${rCable}-${col}${rFspl}-${col}${rDiff}-${col}${rFol}`;
+    const rRssi = push(
+      tt('xlsx.f.rssi'),
+      { f: rssiF('B'), v: num(result.hop1.rssi, 3) },
+      { f: rssiF('C'), v: num(result.hop2.rssi, 3) },
+      'dBm',
+      'RSSI = Pe + Ge + Gr - 2*Lcable - FSPL - Ldiff - Lfeuillage'
+    );
+    const rMargin = push(
+      tt('xlsx.f.marginRow'),
+      { f: `B${rRssi}-B${rSens}`, v: num(result.hop1.margin, 3) },
+      { f: `C${rRssi}-C${rSens}`, v: num(result.hop2.margin, 3) },
+      'dB',
+      'Marge = RSSI - sensibilite'
+    );
+    const sigF = (col) =>
+      `MIN(9.5,5.5+2.5*MIN(1,${col}${rFoliage}/200)+IF(${col}${rDiff}>15,1.5,0))`;
+    const rSigma = push(
+      tt('xlsx.f.sigmaRow'),
+      { f: sigF('B'), v: num(result.hop1.sigma, 3) },
+      { f: sigF('C'), v: num(result.hop2.sigma, 3) },
+      'dB',
+      'sigma = MIN(9,5 ; 5,5 + 2,5*MIN(1 ; profondeur/200) + 1,5 si Ldiff>15)'
+    );
+    push(
+      tt('xlsx.f.margin95Row'),
+      { f: `B${rMargin}-1.6449*B${rSigma}`, v: num(result.hop1.margin95, 3) },
+      { f: `C${rMargin}-1.6449*C${rSigma}`, v: num(result.hop2.margin95, 3) },
+      'dB',
+      'Marge95 = Marge - 1,6449*sigma'
+    );
+    const rClear = push(
+      tt('xlsx.f.clearanceRow'),
+      num(result.hop1.clearance * 100, 3),
+      num(result.hop2.clearance * 100, 3),
+      '%',
+      'degagement / r1'
+    );
+    const penF = (col) => `IF(${col}${rClear}>=60,0,(60-MAX(0,${col}${rClear}))/60*6)`;
+    const pen = (c) => (c >= 0.6 ? 0 : ((0.6 - Math.max(0, c)) / 0.6) * 6);
+    const rPen = push(
+      tt('xlsx.f.penaltyRow'),
+      { f: penF('B'), v: num(pen(result.hop1.clearance), 3) },
+      { f: penF('C'), v: num(pen(result.hop2.clearance), 3) },
+      'dB',
+      '0 dB a 60 % de degagement, 6 dB a 0 %'
+    );
+    push(
+      tt('xlsx.f.scoreRow'),
+      { f: `B${rMargin}-1.6449*B${rSigma}-B${rPen}`, v: num(result.hop1.scored, 3) },
+      { f: `C${rMargin}-1.6449*C${rSigma}-C${rPen}`, v: num(result.hop2.scored, 3) },
+      'dB',
+      'Score = Marge95 - penalite'
+    );
+
+    F.push(['', '', '', '', '']);
+    F.push([tt('xlsx.f.note.live'), '', '', '', '']);
+    F.push([tt('xlsx.f.note.deygout'), '', '', '', '']);
+    F.push([tt('xlsx.f.note.profile'), '', '', '', '']);
+
+    sheets.push({ name: tt('xlsx.sheet.formulas'), rows: F });
+  }
+
   // --- Chaine de relais ----------------------------------------------------
   if (chain?.hops?.length && chain.nodes?.length > 1) {
     const labelOf = (i) => (i === 0 ? 'TX' : i === chain.nodes.length - 1 ? 'RX' : `R${i}`);

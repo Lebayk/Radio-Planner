@@ -172,10 +172,19 @@ function colName(i) {
  * Une cellule. Les nombres partent sans attribut `t` (numerique natif), le
  * reste en chaine « inline » - ce qui evite la table `sharedStrings` sans rien
  * changer pour le lecteur.
+ *
+ * `{ f: 'A1*2', v: 42 }` produit une vraie formule : le tableur la recalcule a
+ * l ouverture, et `v` sert de valeur affichee en attendant. Les noms de
+ * fonctions s ecrivent toujours en anglais dans le format de fichier, le
+ * tableur les traduit lui-meme a l affichage.
  */
 function cellXml(value, ref, bold) {
   const s = bold ? ' s="1"' : '';
   if (value === null || value === undefined || value === '') return '';
+  if (typeof value === 'object' && value.f) {
+    const cached = Number.isFinite(value.v) ? `<v>${value.v}</v>` : '';
+    return `<c r="${ref}"${s}><f>${esc(value.f)}</f>${cached}</c>`;
+  }
   if (typeof value === 'number') {
     if (!Number.isFinite(value)) return ''; // NaN/Infinity : cellule vide, pas un texte trompeur
     return `<c r="${ref}"${s}><v>${value}</v></c>`;
@@ -189,7 +198,10 @@ function sheetXml(rows, { headerRows = 1 } = {}) {
   const widths = [];
   for (const row of rows) {
     row.forEach((v, i) => {
-      const len = v === null || v === undefined ? 0 : String(v).length;
+      // Une cellule-formule s affiche par son resultat, pas par son texte :
+      // dimensionner sur la formule donnerait des colonnes absurdement larges.
+      const shown = v && typeof v === 'object' && v.f ? v.v : v;
+      const len = shown === null || shown === undefined ? 0 : String(shown).length;
       widths[i] = Math.max(widths[i] ?? 8, Math.min(52, len + 2));
     });
   }

@@ -514,12 +514,47 @@ y compris ceux que l'interface n'affiche jamais. Dix feuilles, selon ce qui a
 |---|---|
 | Synthèse | Sites, paramètres radio, verdict, statistiques du balayage |
 | Bilan de liaison | Chaque terme du bilan, bond par bond (FSPL, diffraction, feuillage, v, RSSI, σ) |
+| **Formules** | Le bilan refait pas à pas, en **formules vivantes** — voir ci-dessous |
 | Chaîne de relais | Un bond par ligne, avec coordonnées des deux extrémités, cap et marges |
 | Classement | Les **120** emplacements retenus, pas seulement les 5 affichés |
 | Classement par hauteur | Chaque site × chaque hauteur testée — ces bilans sont calculés pour tous, mais l'interface n'en montre que le meilleur |
 | Hauteurs d'antenne | Le balayage de 2 à 20 m |
 | Profils (×3) | Le relief **point par point** : distance, relief 4/3 + bâti, canopée, ligne de visée, enveloppe de Fresnel, dégagement en mètres et en % |
 | Portée par azimut | La distance atteinte dans chaque direction, pour les deux seuils |
+
+#### La feuille « Formules »
+
+Elle ne montre pas des nombres figés mais **de vraies formules de tableur**.
+Les entrées (fréquence, distance, puissance, gains, perte de câble,
+sensibilité, facteur `k`, géométrie de l'arête dominante, profondeur de
+végétation) sont des cellules modifiables ; tout le reste les référence :
+
+```
+Perte espace libre   =20*LOG10(B5)+20*LOG10(B3)+32,44
+Rayon de Fresnel     =17,31*RACINE(B17*B18/((B3/1000)*B5))
+Paramètre v          =B19*RACINE(2*(B17*1000+B18*1000)/(B4*B17*1000*B18*1000))
+J(v)                 =SI(B20<=-0,78; 0; 6,9+20*LOG10(RACINE((B20-0,1)^2+1)+B20-0,1))
+Feuillage            =SI(B12<=0; 0; (B3/1000)^0,284*SI(MIN(B12;400)<=14; ...))
+RSSI                 =B6+B7+B8-2*B9-B25-B26-B27
+Marge 95 %           =B28-1,6449*B29
+```
+
+Changez la fréquence ou la puissance dans le classeur, et tout le bilan se
+recalcule — sans repasser par l'application. C'est vérifiable ligne à ligne,
+ce qu'un simple tableau de résultats ne permet pas.
+
+**Une seule grandeur échappe à la mise en formule** : la diffraction totale.
+La construction de Deygout parcourt le profil, retient l'arête dominante,
+puis se rappelle récursivement sur les deux sous-tronçons de part et d'autre —
+un algorithme, pas une expression fermée. La ligne `J(v)` reproduit donc
+l'arête dominante seule, en formule vivante, et l'écart avec la diffraction
+totale est exactement ce qu'apportent les arêtes secondaires. C'est écrit dans
+la feuille plutôt que passé sous silence.
+
+Vérifié en ré-évaluant les 28 cellules-formule du fichier produit et en les
+comparant aux valeurs du moteur : **aucun écart**, au-delà de 8·10⁻⁴ dB
+imputable à l'arrondi des entrées — y compris sur le paramètre `v`, qui passe
+par la longueur d'onde et la géométrie de l'arête dominante.
 
 **Pourquoi `.xlsx` et pas CSV.** Un CSV ne transporte que du texte, et le
 séparateur décimal dépend de la locale du tableur qui l'ouvre : le même

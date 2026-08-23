@@ -1014,6 +1014,68 @@ const STRINGS = {
   'xlsx.row.section.scan': ['-- BALAYAGE --', '-- SCAN --'],
   'xlsx.note.disclaimer': ['Avertissement', 'Disclaimer'],
 
+  // --- Feuille « Formules » : le bilan refait pas a pas, en formules vivantes
+  'xlsx.sheet.formulas': ['Formules', 'Formulas'],
+  'xlsx.f.col.quantity': ['Grandeur', 'Quantity'],
+  'xlsx.f.col.symbol': ['Symbole', 'Symbol'],
+  'xlsx.f.col.unit': ['Unite', 'Unit'],
+  'xlsx.f.col.formula': ['Formule appliquee', 'Formula applied'],
+  'xlsx.f.section.inputs': ['-- ENTREES (modifiables) --', '-- INPUTS (editable) --'],
+  'xlsx.f.section.obstacle': ['-- ARETE DOMINANTE --', '-- DOMINANT EDGE --'],
+  'xlsx.f.section.geometry': ['-- GEOMETRIE --', '-- GEOMETRY --'],
+  'xlsx.f.section.losses': ['-- PERTES --', '-- LOSSES --'],
+  'xlsx.f.section.budget': ['-- BILAN --', '-- LINK BUDGET --'],
+  'xlsx.f.freq': ['Frequence', 'Frequency'],
+  'xlsx.f.lambda': ['Longueur d onde', 'Wavelength'],
+  'xlsx.f.dist': ['Longueur du bond', 'Hop length'],
+  'xlsx.f.txPower': ['Puissance d emission', 'Transmit power'],
+  'xlsx.f.gA': ['Gain antenne emission', 'Transmit antenna gain'],
+  'xlsx.f.gB': ['Gain antenne reception', 'Receive antenna gain'],
+  'xlsx.f.cableLoss': ['Perte cable par site', 'Cable loss per site'],
+  'xlsx.f.sensitivity': ['Sensibilite du recepteur', 'Receiver sensitivity'],
+  'xlsx.f.kFactor': ['Facteur de rayon terrestre k', 'Earth radius factor k'],
+  'xlsx.f.d1': ['Distance depuis l emetteur', 'Distance from transmitter'],
+  'xlsx.f.d2': ['Distance jusqu au recepteur', 'Distance to receiver'],
+  'xlsx.f.obstacleH': ['Hauteur de l obstacle au-dessus de la visee', 'Obstacle height above line of sight'],
+  'xlsx.f.foliageDepth': ['Profondeur de vegetation traversee', 'Depth of vegetation crossed'],
+  'xlsx.f.bulge': ['Bombement terrestre a cette abscisse', 'Earth bulge at this abscissa'],
+  'xlsx.f.fresnelR': ['Rayon de la 1re zone de Fresnel', '1st Fresnel zone radius'],
+  'xlsx.f.vParam': ['Parametre de diffraction v', 'Diffraction parameter v'],
+  'xlsx.f.jv': ['Perte de l arete dominante J(v)', 'Dominant edge loss J(v)'],
+  'xlsx.f.diffTotal': ['Diffraction totale (Deygout, multi-aretes)', 'Total diffraction (Deygout, multi-edge)'],
+  'xlsx.f.fsplRow': ['Perte en espace libre', 'Free space path loss'],
+  'xlsx.f.foliageRow': ['Perte de feuillage (Weissberger)', 'Foliage loss (Weissberger)'],
+  'xlsx.f.rssi': ['Puissance recue estimee', 'Estimated received power'],
+  'xlsx.f.marginRow': ['Marge mediane', 'Median margin'],
+  'xlsx.f.sigmaRow': ['Dispersion de lieu', 'Location variability'],
+  'xlsx.f.margin95Row': ['Marge tenue sur 95 % des emplacements', 'Margin held on 95% of locations'],
+  'xlsx.f.clearanceRow': ['Degagement de Fresnel au point critique', 'Fresnel clearance at the critical point'],
+  'xlsx.f.penaltyRow': ['Penalite de degagement', 'Clearance penalty'],
+  'xlsx.f.scoreRow': ['Score de classement', 'Ranking score'],
+  'xlsx.f.note.live': [
+    'Les cellules des colonnes Bond 1 et Bond 2 sont de vraies formules : modifiez une entree ' +
+      '(frequence, puissance, gain...) et tout le bilan se recalcule dans le tableur.',
+    'Cells in the Hop 1 and Hop 2 columns are live formulas: change an input (frequency, power, ' +
+      'gain...) and the whole budget recomputes in the spreadsheet.',
+  ],
+  'xlsx.f.note.deygout': [
+    'Seule exception : la diffraction totale ne se met pas en formule. La construction de Deygout ' +
+      'parcourt le profil et se rappelle recursivement sur les sous-troncons de part et d autre de ' +
+      'l arete dominante ; la ligne J(v) ci-dessus ne reproduit que cette arete dominante, et ' +
+      'l ecart entre les deux est exactement ce qu apportent les aretes secondaires.',
+    'One exception: total diffraction cannot be expressed as a formula. The Deygout construction ' +
+      'walks the profile and recurses on the sub-sections either side of the dominant edge; the ' +
+      'J(v) row above reproduces only that dominant edge, and the gap between the two is exactly ' +
+      'what the secondary edges contribute.',
+  ],
+  'xlsx.f.note.profile': [
+    'Le rayon de Fresnel, le bombement et le parametre v sont donnes a l abscisse de l arete ' +
+      'dominante. Les feuilles Profil donnent ces memes grandeurs en chaque point du trajet.',
+    'Fresnel radius, earth bulge and the v parameter are given at the dominant edge abscissa. The ' +
+      'Profile sheets give the same quantities at every point along the path.',
+  ],
+  'xlsx.f.noEdge': ['aucune arete obstruante', 'no obstructing edge'],
+
   // --- mapRender.js (carte schematique du PDF) ------------------------------
   'mapRender.legend.reliable': ['Portee fiable', 'Reliable range'],
   'mapRender.legend.limited': ['Reception limite', 'Limited reception'],
