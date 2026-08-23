@@ -1031,6 +1031,12 @@ const STRINGS = {
   'area.progress.dem': ['Relief de la zone - {{done}}/{{total}} requetes', 'Area terrain - {{done}}/{{total}} requests'],
   'area.progress.scan': ['Recherche du meilleur emplacement', 'Searching for the best location'],
   'area.error.noZone': ['Definissez d abord une zone sur la carte.', 'Define an area on the map first.'],
+  'area.demTooBigTitle': ['Relief trop fin pour cette zone', 'Terrain too fine for this area'],
+  'area.demTooBigMsg': [
+    'La grille de relief depasserait la limite de memoire du navigateur. Corrigez d un clic :',
+    'The terrain grid would exceed the browser memory limit. Fix it in one click:',
+  ],
+  'area.demTooBigFix': ['Passer le pas du relief a {{step}} m', 'Set terrain step to {{step}} m'],
   'area.error.tooBig': [
     'Zone trop vaste pour ce pas de relief : augmentez le pas, ou reduisez la zone.',
     'Area too large for this terrain step: increase the step, or shrink the area.',

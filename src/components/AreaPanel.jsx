@@ -182,6 +182,20 @@ export default function AreaPanel({
         </div>
       )}
 
+      {demEstimate?.tooBig && (
+        <Banner tone="error" title={t('area.demTooBigTitle')}>
+          <p>{t('area.demTooBigMsg')}</p>
+          {Number.isFinite(demEstimate.suggestedGridStep) && (
+            <button
+              type="button"
+              className="mt-1.5 rounded border border-rose-500/40 bg-rose-500/15 px-2 py-1 text-[11px] font-medium text-rose-100 transition hover:bg-rose-500/25"
+              onClick={() => set({ gridStep: demEstimate.suggestedGridStep })}
+            >
+              {t('area.demTooBigFix', { step: demEstimate.suggestedGridStep })}
+            </button>
+          )}
+        </Banner>
+      )}
       {tooHeavy && <Banner tone="error" title={t('area.tooHeavyTitle')}>{t('area.tooHeavyMsg', { n: big(plan.candidates) })}</Banner>}
       {heavy && <Banner tone="warn">{t('area.heavyWarn', { n: big(plan.totalSamples) })}</Banner>}
 
@@ -189,7 +203,7 @@ export default function AreaPanel({
         type="button"
         className="btn-primary w-full"
         onClick={onRun}
-        disabled={busy || disabled || !zone || tooHeavy}
+        disabled={busy || disabled || !zone || tooHeavy || demEstimate?.tooBig}
       >
         {busy ? (
           <>

@@ -243,7 +243,14 @@ export default function App() {
     abortRef.current?.abort();
     workerRef.current?.terminate();
     workerRef.current = null;
+    // Le meme bouton annule le balayage TX-RX ou la recherche de zone, selon
+    // celui en cours : oublier l un des deux laisserait son etat "occupe"
+    // bloque indefiniment si l utilisateur annule pendant sa phase calcul.
+    areaWorkerRef.current?.terminate();
+    areaWorkerRef.current = null;
     setPhase('idle');
+    setAreaBusy(false);
+    setAreaProgress(null);
     setProgress(null);
   }, []);
 
@@ -571,7 +578,16 @@ export default function App() {
     if (!zone) return null;
     try {
       const g = zoneGrid(zone, config.area.gridStep);
-      if (g.nx * g.ny > MAX_CELLS) return { tooBig: true, points: g.nx * g.ny };
+      if (g.nx * g.ny > MAX_CELLS) {
+        // Meme correctif que pour le balayage TX-RX : plutot que de se
+        // contenter d un refus, on calcule tout de suite de combien il
+        // faudrait relacher le pas du relief.
+        const corner1 = { lat: zone.latMin, lon: zone.lonMin };
+        const corner2 = { lat: zone.latMax, lon: zone.lonMax };
+        const suggestedGridStep =
+          Math.ceil(minFeasibleStep(corner1, corner2, 0, MAX_CELLS, config.area.gridStep) / 5) * 5;
+        return { tooBig: true, points: g.nx * g.ny, suggestedGridStep };
+      }
       const pts = maskedPoints(g, new Uint8Array(g.nx * g.ny).fill(1));
       const { requests, seconds } = estimateRequests(provider, pts);
       return { points: pts.length, requests, seconds, grid: g, pts };
@@ -627,7 +643,15 @@ export default function App() {
       gridStep: config.area.gridStep,
       maxRangeM,
     });
-    if (!plan || plan.tooBig) return;
+    // Le bouton est deja desactive dans ce cas (AreaPanel calcule le meme
+    // plan) : ce garde-fou ne devrait normalement jamais se declencher, mais
+    // un retour silencieux serait indiscernable d une panne si jamais il l
+    // etait - par exemple lors d une reconfiguration entre le rendu du
+    // bouton et le clic.
+    if (!plan || plan.tooBig) {
+      setError(t('area.tooHeavyMsg', { n: plan ? plan.candidates.toLocaleString(locale) : '-' }));
+      return;
+    }
 
     setError(null);
     setAreaBusy(true);
@@ -1518,6 +1542,26 @@ export default function App() {
         )}
 
       </header>
+
+      {/*
+        Barre de progression persistante : le seul retour visible pendant un
+        calcul restait jusqu ici un pourcentage nu dans le bouton qui l a
+        declenche, invisible des qu on change d onglet ou qu on defile la
+        page. Sur une recherche de zone dont le telechargement de relief peut
+        prendre plusieurs minutes, l absence de retour est indiscernable d une
+        panne - c est exactement ce qui a ete signale. Visible sur tous les
+        onglets, avec de quoi annuler sans chercher le bon bouton.
+      */}
+      {progress && (
+        <div className="z-10 flex shrink-0 items-center gap-3 border-b border-ink-500/70 bg-ink-800/95 px-3 py-2 backdrop-blur">
+          <div className="min-w-0 flex-1">
+            <Progress value={progress.value} total={progress.total} label={progress.label} />
+          </div>
+          <button type="button" className="btn-ghost shrink-0 !py-1 !text-[11px]" onClick={cancelScan}>
+            {t('app.cancel')}
+          </button>
+        </div>
+      )}
 
       {/* Corps */}
       <div className="flex min-h-0 flex-1 lg:grid lg:grid-cols-[380px_minmax(0,1fr)] xl:grid-cols-[400px_minmax(0,1fr)]">

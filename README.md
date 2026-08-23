@@ -489,8 +489,40 @@ croisées, 81 emplacements × 1 681 points de test) :
   de 32 en retrouve 9, **de 48 les retrouve tous** — d'où ce choix par défaut,
   le re-calcul exact coûtant peu au regard du balayage.
 
-**Ce qui reste hors de portée, et pourquoi.** Le calcul n'est plus le mur : le
-**téléchargement du relief** l'est. Une zone de 220 × 220 km à 100 m
+### Le vrai bug trouvé après coup : aucun retour visible pendant le calcul
+
+Signalé ainsi : « quand je clique sur chercher le meilleur rien ne se passe ».
+Le calcul tournait bel et bien, mais la seule information affichée pendant le
+téléchargement du relief était un spinner nu dans le bouton — le
+[`<Progress>`](src/components/ui.jsx) qui affiche le libellé détaillé
+(« Relief de la zone - 34/266 requêtes ») était importé dans `App.jsx` mais
+**jamais posé dans le rendu**. Sur une zone qui demande des centaines de
+requêtes à une API gratuite, plusieurs dizaines de secondes sans le moindre
+chiffre sont rigoureusement indiscernables d'une panne.
+
+Corrigé par une barre de progression persistante sous l'en-tête, visible sur
+tous les onglets, avec le libellé détaillé et un bouton Annuler toujours à
+portée — plus besoin de deviner dans quel onglet ni à quelle hauteur de
+défilement chercher un signe de vie. Le même bouton Annuler arrête maintenant
+indifféremment le balayage TX-RX ou la recherche de zone, quel que soit celui
+en cours ; auparavant, annuler pendant la recherche de zone laissait son état
+« occupé » bloqué indéfiniment, le worker orphelin continuant en silence.
+
+Deux défauts connexes corrigés dans la foulée :
+- **retour silencieux réel** dans `runAreaSearch` (`if (!plan || plan.tooBig)
+  return;`, sans le moindre message) — improbable en usage normal puisque le
+  bouton est déjà désactivé dans ce cas, mais un garde-fou qui échoue en
+  silence est pire qu'inutile s'il se déclenche jamais ;
+- **grille de relief trop fine pour la zone** (`MAX_CELLS`) signalée par une
+  bannière globale tout en haut du panneau, hors de vue si l'on a défilé
+  jusqu'à la section « Couvrir une zone » — corrigé avec le même correctif en
+  un clic que pour le balayage TX-RX (`minFeasibleStep`), affiché cette fois
+  juste sous le bouton concerné plutôt que loin de l'endroit regardé.
+
+### Ce qui reste hors de portée, et pourquoi
+
+Le calcul n'est plus le mur : le **téléchargement du relief** l'est. Une zone
+de 220 × 220 km à 100 m
 représente 4,8 millions de points MNT, soit ~24 200 requêtes et près de deux
 heures contre une API gratuite. La grille reste donc plafonnée, et c'est elle
 qui limite la taille de zone praticable — pas la vitesse d'exécution.
