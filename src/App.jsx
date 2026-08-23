@@ -11,6 +11,8 @@ import LinkSummary from './components/LinkSummary.jsx';
 import Disclaimer from './components/Disclaimer.jsx';
 import CoveragePanel from './components/CoveragePanel.jsx';
 import ChainPanel from './components/ChainPanel.jsx';
+import AreaPanel, { MAX_LINKS } from './components/AreaPanel.jsx';
+import AreaResults from './components/AreaResults.jsx';
 import { Section, Checkbox, Banner, Progress, Spinner, MarginChip, DropdownMenu } from './components/ui.jsx';
 
 import { loadConfig, saveConfig, resetConfig } from './lib/storage.js';
@@ -20,6 +22,7 @@ import { haversine, bearing } from './lib/geo.js';
 import { DEVICE_BY_ID, PRESET_BY_ID } from './lib/radio.js';
 import { analyzeSite, heightSweep, analyzeDirect, profileFromGrid, clutterProfiles, getHopProfiles, pinProfiles } from './lib/analysis.js';
 import { fetchClutter, estimateClutter, gridBbox, clutterSummary } from './lib/clutter.js';
+import { normalizeZone, zoneGrid, zonePointGrid, estimateArea, zoneMetrics } from './lib/area.js';
 import { loadRoads, nearestRoad, bboxAround, clearRoadCache } from './lib/osm.js';
 import { exportGpx, exportKml, exportPdf, exportXlsx, preloadPdf } from './lib/exporters.js';
 import { renderCoverageMapPNG } from './lib/mapRender.js';
@@ -66,6 +69,13 @@ export default function App() {
   const [roads, setRoads] = useState([]);
   const [roadsBusy, setRoadsBusy] = useState(false);
 
+  // Recherche du meilleur relais pour couvrir une zone : etat independant du
+  // balayage TX-RX, les deux repondent a des questions differentes.
+  const [zonePending, setZonePending] = useState(null); // premier coin pose
+  const [areaResult, setAreaResult] = useState(null);
+  const [areaBusy, setAreaBusy] = useState(false);
+  const [areaProgress, setAreaProgress] = useState(null);
+
   const [pickMode, setPickMode] = useState(null); // 'tx' | 'rx' | 'both'
   const [pickStep, setPickStep] = useState(0); // avancement du placement en deux clics
   const [focus, setFocus] = useState({ type: 'fit', n: 0 });
@@ -76,6 +86,7 @@ export default function App() {
   const [exportError, setExportError] = useState(null);
 
   const workerRef = useRef(null);
+  const areaWorkerRef = useRef(null);
   const abortRef = useRef(null);
   const chartsRef = useRef({});
   const exportBtnRef = useRef(null);
@@ -499,6 +510,22 @@ export default function App() {
         return;
       }
 
+      if (pickMode === 'zone') {
+        if (pickStep === 0) {
+          setZonePending(coords);
+          setPickStep(1);
+        } else {
+          patch('area', { ...config.area, zone: normalizeZone(zonePending, coords) });
+          setZonePending(null);
+          setPickMode(null);
+          setPickStep(0);
+          // Une nouvelle zone perime le classement precedent : le garder
+          // afficherait des emplacements calcules pour une autre surface.
+          setAreaResult(null);
+        }
+        return;
+      }
+
       if (pickMode === 'tx' || pickMode === 'rx') {
         patch(pickMode, { ...config[pickMode], ...coords });
         setPickMode(null);
@@ -533,8 +560,170 @@ export default function App() {
         setManualBusy(false);
       }
     },
-    [pickMode, pickStep, patch, config, scan, detail, search.heights, tx, rx, provider, txSite, rxSite, radio, t]
+    [pickMode, pickStep, patch, config, scan, detail, search.heights, tx, rx, provider, txSite, rxSite, radio, t, zonePending]
   );
+
+  // --- Meilleur emplacement pour couvrir une zone --------------------------
+
+  /** Estimation du telechargement MNT propre a la zone. */
+  const areaDemEstimate = useMemo(() => {
+    const zone = config.area.zone;
+    if (!zone) return null;
+    try {
+      const g = zoneGrid(zone, config.area.gridStep);
+      if (g.nx * g.ny > MAX_CELLS) return { tooBig: true, points: g.nx * g.ny };
+      const pts = maskedPoints(g, new Uint8Array(g.nx * g.ny).fill(1));
+      const { requests, seconds } = estimateRequests(provider, pts);
+      return { points: pts.length, requests, seconds, grid: g, pts };
+    } catch {
+      return null;
+    }
+  }, [config.area.zone, config.area.gridStep, provider]);
+
+  const runAreaSearch = useCallback(async () => {
+    const zone = config.area.zone;
+    if (!zone) {
+      setError(t('area.error.noZone'));
+      return;
+    }
+    if (!areaDemEstimate || areaDemEstimate.tooBig) {
+      setError(t('area.error.tooBig'));
+      return;
+    }
+    const est = estimateArea(zone, config.area.candidateStep, config.area.testStep);
+    if (est.links > MAX_LINKS) return;
+
+    setError(null);
+    setAreaBusy(true);
+    setAreaProgress(null);
+    setAreaResult(null);
+
+    const ctl = new AbortController();
+    abortRef.current = ctl;
+
+    try {
+      const grid = areaDemEstimate.grid;
+      const pts = areaDemEstimate.pts;
+
+      setProgress({ label: t('area.progress.dem', { done: 0, total: areaDemEstimate.requests }), value: 0, total: Math.max(1, areaDemEstimate.requests) });
+      const { values, warnings: w } = await fetchElevations(provider, pts, {
+        signal: ctl.signal,
+        onProgress: ({ done, total }) =>
+          setProgress({
+            label: t('area.progress.dem', { done, total: total || areaDemEstimate.requests }),
+            value: done,
+            total: Math.max(1, total || areaDemEstimate.requests),
+          }),
+      });
+      if (w.length) setWarnings((prev) => [...new Set([...prev, ...w])]);
+
+      const dem = new Float32Array(grid.nx * grid.ny).fill(NaN);
+      for (let i = 0; i < pts.length; i++) dem[pts[i].idx] = values[i];
+
+      // Couverture du sol sur la zone, aux memes conditions que le balayage
+      // TX-RX : sans elle la portee est nettement surestimee.
+      let clutter = null;
+      if (search.clutter) {
+        try {
+          setProgress({ label: t('app.progress.clutter'), value: 0, total: 1 });
+          clutter = await fetchClutter({
+            grid,
+            buildingBbox: search.buildings ? gridBbox(grid) : null,
+            signal: ctl.signal,
+            onProgress: ({ done, total, waitingMs }) =>
+              setProgress({
+                label: waitingMs
+                  ? t('app.progress.clutterQuota', { s: Math.round(waitingMs / 1000) })
+                  : t('app.progress.clutter'),
+                value: done,
+                total: Math.max(1, total),
+              }),
+          });
+        } catch (e) {
+          if (e.name === 'AbortError') throw e;
+          setWarnings((prev) => [...prev, t('app.warn.clutterFailed', { msg: e.message })]);
+        }
+      }
+
+      const cand = zonePointGrid(zone, config.area.candidateStep);
+      const targ = zonePointGrid(zone, config.area.testStep);
+
+      setProgress({ label: t('area.progress.scan'), value: 0, total: 1 });
+
+      areaWorkerRef.current?.terminate();
+      const worker = new Worker(new URL('./workers/area.worker.js', import.meta.url), { type: 'module' });
+      areaWorkerRef.current = worker;
+
+      worker.onmessage = (ev) => {
+        const m = ev.data;
+        if (m.type === 'progress') {
+          setAreaProgress({ done: m.done, total: m.total });
+          setProgress({ label: t('area.progress.scan'), value: m.done, total: m.total });
+        } else if (m.type === 'done') {
+          setAreaResult({ top: m.top, scores: m.scores, cand: m.cand, stats: m.stats, zone });
+          setAreaBusy(false);
+          setAreaProgress(null);
+          setProgress(null);
+          setFocus((f) => ({
+            type: 'rect',
+            bounds: [
+              [zone.latMin, zone.lonMin],
+              [zone.latMax, zone.lonMax],
+            ],
+            n: f.n + 1,
+          }));
+          setTab('results');
+          worker.terminate();
+          areaWorkerRef.current = null;
+        } else if (m.type === 'error') {
+          setError(t('app.error.calc', { msg: m.message }));
+          setAreaBusy(false);
+          setProgress(null);
+        }
+      };
+      worker.onerror = (e) => {
+        setError(t('app.error.worker', { msg: e.message }));
+        setAreaBusy(false);
+        setProgress(null);
+      };
+
+      // Portee en espace libre au seuil retenu : au-dela, aucun relief ne
+      // rattrape le bilan, le worker peut sauter le point sans le derouler.
+      const params = {
+        freqMHz: radio.freq,
+        cableLoss: radio.cableLoss,
+        sensitivity: PRESET_BY_ID[radio.preset].sens,
+        k: 4 / 3,
+        hA: config.area.relayHeight,
+        hB: config.coverage.nodeHeight,
+        gA: radio.relayGain,
+        gB: config.coverage.nodeGain,
+        txPower: radio.relayPower,
+      };
+      const maxRangeM = freeSpaceRangeM({ ...params, margin: radio.desiredMargin });
+
+      worker.postMessage({
+        type: 'area',
+        grid,
+        dem,
+        clutter,
+        candidates: cand.pts,
+        targets: targ.pts,
+        cand: { nx: cand.nx, ny: cand.ny, lat0: cand.lat0, lon0: cand.lon0, dLat: cand.dLat, dLon: cand.dLon },
+        params,
+        threshold: radio.desiredMargin,
+        maxRangeM,
+        zoneAreaKm2: zoneMetrics(zone).areaKm2,
+      });
+    } catch (e) {
+      if (e.name !== 'AbortError') setError(e.message);
+      setAreaBusy(false);
+      setAreaProgress(null);
+      setProgress(null);
+    }
+  }, [config.area, config.coverage, areaDemEstimate, provider, radio, search.clutter, search.buildings, t]);
+
+  useEffect(() => () => areaWorkerRef.current?.terminate(), []);
 
   const onSiteDrag = useCallback(
     (kind, pt) => {
@@ -892,6 +1081,29 @@ export default function App() {
         />
       </Section>
 
+      <Section title={t('app.section.area')} icon="▭" defaultOpen={false}>
+        <AreaPanel
+          area={config.area}
+          onChange={(v) => patch('area', v)}
+          picking={pickMode === 'zone'}
+          onPickToggle={() => {
+            setPickMode((p) => (p === 'zone' ? null : 'zone'));
+            setPickStep(0);
+            setZonePending(null);
+          }}
+          onClear={() => {
+            patch('area', { ...config.area, zone: null });
+            setAreaResult(null);
+            setZonePending(null);
+          }}
+          onRun={runAreaSearch}
+          busy={areaBusy}
+          progress={areaProgress}
+          demEstimate={areaDemEstimate}
+          disabled={busy}
+        />
+      </Section>
+
       <Section title={t('app.section.display')} icon="▦" defaultOpen={false}>
         <Checkbox
           checked={config.ui.heatmap}
@@ -947,6 +1159,22 @@ export default function App() {
           {t('app.emptyState1')}
           <br />
           {t('app.emptyState2')}
+        </div>
+      )}
+
+      {areaResult && (
+        <div className="card p-3">
+          <h3 className="mb-3 text-[13px] font-semibold uppercase tracking-wider text-zinc-400">
+            {t('area.resultsTitle')}
+          </h3>
+          <AreaResults
+            result={areaResult}
+            desiredMargin={radio.desiredMargin}
+            onLocate={(r) => {
+              setFocus((f) => ({ type: 'point', lat: r.lat, lon: r.lon, n: f.n + 1 }));
+              setTab('map');
+            }}
+          />
         </div>
       )}
 
@@ -1277,6 +1505,10 @@ export default function App() {
                 setSelected(i);
                 setTab('results');
               }}
+              onAreaSpotClick={() => setTab('results')}
+              zone={config.area.zone}
+              zonePending={pickMode === 'zone' && pickStep === 1 ? zonePending : null}
+              areaResult={areaResult}
               focus={focus}
             />
             {manualBusy && (

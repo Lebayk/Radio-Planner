@@ -395,6 +395,50 @@ Une fois un balayage effectué, un clic libre sur la carte évalue
 l'emplacement pointé — pratique pour tester un pylône ou un toit précis que la
 grille n'a pas retenu.
 
+## Couvrir une zone
+
+Le reste de l'application répond à « où poser un relais **entre ces deux
+points** ? ». Cette section répond à la question inverse : « voici une zone,
+**où poser un relais pour en couvrir le plus possible** ? »
+
+Tracez un rectangle en deux clics ; l'application essaie chaque emplacement
+d'un semis régulier dans la zone, et pour chacun évalue la liaison vers chaque
+point de test de la même zone. Le meilleur emplacement est celui qui en atteint
+le plus. Résultat : un classement, une carte de chaleur des emplacements, et
+les cinq meilleurs pointés sur la carte.
+
+**Comptage de points, et non aire d'un polygone.** Le calcul de portée
+existant trace une étoile de rayons et s'arrête à la première rupture — une
+région *étoilée*, qui par construction ne peut pas représenter une poche de
+réception au-delà d'un versant. Compter des points de test n'a pas cette
+limite, et surtout mesure exactement ce qui est demandé : la surface **de la
+zone** couverte, pas la portée dans toutes les directions.
+
+La surface couverte se déduit de la fraction de points atteints multipliée par
+la surface réelle de la zone, et non d'un comptage de mailles. Le semis
+régulier ne pave pas exactement le rectangle — huit points espacés de 500 m
+couvrent 4,0 km, pas 3,88 — et compter les mailles annonçait une surface
+couverte *supérieure* à celle de la zone, ce que la vérification a montré.
+
+**Le rectangle est convexe**, donc tout profil entre deux de ses points y
+reste : le MNT à télécharger se limite à la zone elle-même, sans la marge que
+réclame le calcul de portée. Une zone de 12 km² tient en 8 requêtes.
+
+Le coût est **quadratique** — emplacements testés × points de test — et
+affiché avant de lancer : diviser un pas par deux multiplie le travail par
+quatre. Au-delà de quatre millions de liaisons le bouton se bloque plutôt que
+de geler l'onglet. À titre d'ordre de grandeur, 3 080 liaisons sur une zone de
+12 km² s'évaluent en 24 ms dans le Web Worker.
+
+**Limite assumée** : les emplacements candidats sont pris *dans* la zone. Un
+sommet situé juste en dehors, qui la couvrirait peut-être mieux, n'est pas
+testé — il faut élargir la zone pour l'inclure. C'est écrit sous le panneau
+plutôt que laissé à deviner.
+
+Le critère retenu est la **marge à 95 %**, celle sur laquelle se prononce le
+verdict partout ailleurs dans l'application : classer sur la marge médiane
+annoncerait une couverture que le reste de l'application jugerait fragile.
+
 ## Profils matériel
 
 Le sélecteur **Matériel** renseigne d'un geste la puissance, le gain d'antenne

@@ -39,6 +39,16 @@ export const DEFAULT_CONFIG = {
     radiusKm: 15,
     azimuths: 72,
   },
+  // Recherche du meilleur relais pour couvrir une zone. `zone` reste nul tant
+  // que l utilisateur n en a pas trace une ; la fusion defensive ci-dessous
+  // ignore les objets non typables, d ou le traitement explicite plus bas.
+  area: {
+    zone: null,
+    relayHeight: 10,
+    candidateStep: 400,
+    testStep: 400,
+    gridStep: 100,
+  },
   provider: 'ign',
   ui: { heatmap: true, candidates: true, coverage: true, chain: true },
 };
@@ -54,6 +64,11 @@ function merge(base, saved) {
     if (s === undefined || s === null) continue;
     if (Array.isArray(base[key])) {
       if (Array.isArray(s)) out[key] = s.filter(isNum);
+    } else if (base[key] === null) {
+      // Defaut nul (la zone a couvrir, tant qu aucune n est tracee) : il n y a
+      // pas de gabarit a fusionner, seulement une valeur a valider. Sans ce
+      // cas, la fusion recursive appellerait Object.keys(null).
+      if (typeof s === 'object' && Object.values(s).every(isNum)) out[key] = { ...s };
     } else if (typeof base[key] === 'object') {
       out[key] = merge(base[key], s);
     } else if (typeof s === typeof base[key]) {

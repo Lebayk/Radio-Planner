@@ -51,6 +51,44 @@ function corridorPolygon(tx, rx, radius, steps = 24) {
   return pts.map((p) => [p.lat, p.lon]);
 }
 
+/**
+ * Carte de chaleur de la couverture de zone : part de la zone atteinte depuis
+ * chaque emplacement candidat, du violet (faible) au vert (fort).
+ *
+ * Echelle distincte de celle des marges : ici la grandeur est une fraction
+ * entre 0 et 1, pas des decibels, et reutiliser la meme palette laisserait
+ * croire qu on lit la meme chose.
+ */
+function areaHeatDataUrl(nx, ny, scores) {
+  const c = document.createElement('canvas');
+  c.width = nx;
+  c.height = ny;
+  const ctx = c.getContext('2d');
+  const img = ctx.createImageData(nx, ny);
+  let max = 0;
+  for (let i = 0; i < scores.length; i++) if (Number.isFinite(scores[i]) && scores[i] > max) max = scores[i];
+  for (let iy = 0; iy < ny; iy++) {
+    const rowOut = ny - 1 - iy; // ligne 0 de la grille = sud, ligne 0 du canvas = nord
+    for (let ix = 0; ix < nx; ix++) {
+      const v = scores[iy * nx + ix];
+      const o = (rowOut * nx + ix) * 4;
+      if (!Number.isFinite(v) || max <= 0) {
+        img.data[o + 3] = 0;
+        continue;
+      }
+      // Normalise sur le meilleur emplacement : ce qui interesse est le
+      // contraste entre emplacements, pas la valeur absolue.
+      const f = Math.max(0, Math.min(1, v / max));
+      img.data[o] = Math.round(124 + (34 - 124) * f);
+      img.data[o + 1] = Math.round(58 + (197 - 58) * f);
+      img.data[o + 2] = Math.round(237 + (94 - 237) * f);
+      img.data[o + 3] = Math.round(40 + 165 * f);
+    }
+  }
+  ctx.putImageData(img, 0, 0);
+  return c.toDataURL();
+}
+
 /** Rendu de la carte de chaleur dans un canvas, puis pose en imageOverlay. */
 function heatDataUrl(grid, heat) {
   const c = document.createElement('canvas');
@@ -104,6 +142,10 @@ export default function MapView({
   onMapClick,
   onSiteDrag,
   onCandidateClick,
+  onAreaSpotClick,
+  zone,
+  zonePending,
+  areaResult,
   focus,
 }) {
   const { t } = useI18n();
@@ -111,7 +153,7 @@ export default function MapView({
   const mapRef = useRef(null);
   const layersRef = useRef({});
   const cbRef = useRef({});
-  cbRef.current = { onMapClick, onSiteDrag, onCandidateClick };
+  cbRef.current = { onMapClick, onSiteDrag, onCandidateClick, onAreaSpotClick };
   // Traductions lues dans les effets Leaflet (hors JSX) : capturees dans un
   // ref pour que les effets qui ne dependent pas de la langue n aient pas a
   // la lister dans leurs dependances, sans pour autant figer une traduction
@@ -139,6 +181,7 @@ export default function MapView({
 
     const groups = {
       heat: L.layerGroup().addTo(map),
+      area: L.layerGroup().addTo(map),
       chain: L.layerGroup().addTo(map),
       coverage: L.layerGroup().addTo(map),
       corridor: L.layerGroup().addTo(map),
@@ -172,7 +215,7 @@ export default function MapView({
     const el = hostRef.current;
     // Le viseur n est affiche que pour un placement explicite de site :
     // en mode "point force" le clic reste possible sans changer le curseur.
-    const placing = pickMode === 'tx' || pickMode === 'rx' || pickMode === 'both';
+    const placing = pickMode === 'tx' || pickMode === 'rx' || pickMode === 'both' || pickMode === 'zone';
     if (el) el.style.cursor = placing ? 'crosshair' : '';
   }, [pickMode]);
 
@@ -301,6 +344,79 @@ export default function MapView({
         .addTo(st.groups.chain);
     });
   }, [chain, t]);
+
+  // --- Zone a couvrir, carte de couverture et meilleurs emplacements --------
+  useEffect(() => {
+    const st = layersRef.current;
+    if (!st?.alive) return;
+    st.groups.area.clearLayers();
+    if (!zone && !zonePending) return;
+
+    // Premier coin deja pose : un reperage discret, le temps du second clic.
+    if (zonePending) {
+      L.circleMarker([zonePending.lat, zonePending.lon], {
+        radius: 5,
+        color: '#38bdf8',
+        weight: 2,
+        fillColor: '#38bdf8',
+        fillOpacity: 0.6,
+      }).addTo(st.groups.area);
+    }
+    if (!zone) return;
+
+    L.rectangle(
+      [
+        [zone.latMin, zone.lonMin],
+        [zone.latMax, zone.lonMax],
+      ],
+      {
+        color: '#a855f7',
+        weight: 2,
+        opacity: 0.9,
+        dashArray: '6 4',
+        fillColor: '#a855f7',
+        fillOpacity: 0.05,
+        interactive: false,
+      }
+    )
+      .bindTooltip(t('area.tooltip.zone'), { sticky: true })
+      .addTo(st.groups.area);
+
+    if (areaResult?.scores && areaResult.cand) {
+      const { nx, ny, lat0, lon0, dLat, dLon } = areaResult.cand;
+      if (nx > 1 && ny > 1) {
+        L.imageOverlay(
+          areaHeatDataUrl(nx, ny, areaResult.scores),
+          L.latLngBounds([lat0, lon0], [lat0 + (ny - 1) * dLat, lon0 + (nx - 1) * dLon]),
+          { opacity: 0.75, interactive: false, className: 'heat-overlay' }
+        ).addTo(st.groups.area);
+      }
+    }
+
+    (areaResult?.top ?? []).slice(0, 5).forEach((s, i) => {
+      const m = L.circleMarker([s.lat, s.lon], {
+        radius: i === 0 ? 9 : 6,
+        color: '#0b0e14',
+        weight: 2,
+        fillColor: i === 0 ? '#22c55e' : '#86efac',
+        fillOpacity: 1,
+      });
+      m.bindTooltip(
+        t('area.tooltip.spot', {
+          n: i + 1,
+          pct: (s.fraction * 100).toFixed(1),
+          km: s.areaKm2.toFixed(1),
+          elev: s.elev.toFixed(0),
+        }),
+        { direction: 'top', offset: [0, -8] }
+      );
+      m.on('click', (e) => {
+        L.DomEvent.stopPropagation(e);
+        cbRef.current.onAreaSpotClick?.(s, i);
+      });
+      m.addTo(st.groups.area);
+    });
+  }, [zone, zonePending, areaResult, t]);
 
   // --- Corridor de recherche ------------------------------------------------
   useEffect(() => {
@@ -432,6 +548,10 @@ export default function MapView({
     if (!map || !layersRef.current?.alive || !focus) return;
     if (focus.type === 'fit') {
       map.fitBounds(linkBounds(), { padding: [45, 45], maxZoom: 16, animate: false });
+    } else if (focus.type === 'rect' && focus.bounds) {
+      // Cadrage exact sur la zone a couvrir, sans y meler TX ni le relais :
+      // les y inclure eloignerait la vue de ce que l on vient de calculer.
+      map.fitBounds(L.latLngBounds(focus.bounds), { padding: [30, 30], animate: false });
     } else if (focus.type === 'bounds' && focus.points?.length) {
       const b = L.latLngBounds(focus.points);
       b.extend([relay?.lat ?? tx.lat, relay?.lon ?? tx.lon]);
@@ -556,6 +676,12 @@ export default function MapView({
           {pickMode === 'both' && (
             <>
               {pickStep === 0 ? t('map.pick.tx1of2') : t('map.pick.rx2of2')}
+              <span className="ml-2 text-sky-300/70">{t('map.pick.escape')}</span>
+            </>
+          )}
+          {pickMode === 'zone' && (
+            <>
+              {pickStep === 0 ? t('area.pick1') : t('area.pick2')}
               <span className="ml-2 text-sky-300/70">{t('map.pick.escape')}</span>
             </>
           )}

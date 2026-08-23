@@ -911,6 +911,103 @@ const STRINGS = {
   ],
   'export.pdf.warningTitle': ['Avertissement', 'Warning'],
 
+  // --- Couverture d une zone -------------------------------------------------
+  'app.section.area': ['Couvrir une zone', 'Cover an area'],
+  'area.intro': [
+    'Definissez une zone : l application cherche l emplacement de relais qui en couvre la plus ' +
+      'grande part. Les emplacements testes sont pris dans la zone elle-meme.',
+    'Define an area: the app searches for the relay location that covers the largest share of it. ' +
+      'Candidate locations are taken from within the area itself.',
+  ],
+  'area.define': ['Definir la zone', 'Define the area'],
+  'area.redefine': ['Redefinir la zone', 'Redefine the area'],
+  'area.cancel': ['Annuler', 'Cancel'],
+  'area.clear': ['Effacer', 'Clear'],
+  'area.pickHint': [
+    'Cliquez deux coins opposes de la zone sur la carte.',
+    'Click two opposite corners of the area on the map.',
+  ],
+  'area.pick1': ['Cliquez le premier coin de la zone (1 sur 2)', 'Click the first corner of the area (1 of 2)'],
+  'area.pick2': ['Cliquez le coin oppose (2 sur 2)', 'Click the opposite corner (2 of 2)'],
+  'area.noZone': ['Aucune zone definie.', 'No area defined.'],
+  'area.size': ['Zone', 'Area'],
+  'area.sizeValue': ['{{w}} x {{h}} km - {{a}} km2', '{{w}} x {{h}} km - {{a}} km2'],
+  'area.relayHeight': ['Hauteur antenne du relais', 'Relay antenna height'],
+  'area.candidateStep': ['Pas entre emplacements testes', 'Spacing between tested locations'],
+  'area.candidateStepHint': [
+    'Plus le pas est fin, plus la recherche est precise - et longue : le nombre de liaisons a ' +
+      'evaluer varie comme le carre de ce reglage.',
+    'The finer the spacing, the more precise the search - and the longer: the number of links to ' +
+      'evaluate varies as the square of this setting.',
+  ],
+  'area.testStep': ['Pas entre points de test', 'Spacing between test points'],
+  'area.testStepHint': [
+    'Maille representant la surface a couvrir. Chaque point compte pour un carre de cette taille.',
+    'Cell representing the surface to cover. Each point stands for a square of this size.',
+  ],
+  'area.gridStep': ['Pas du relief', 'Terrain step'],
+  'area.candidates': ['Emplacements testes', 'Locations tested'],
+  'area.targets': ['Points de test', 'Test points'],
+  'area.links': ['Liaisons a evaluer', 'Links to evaluate'],
+  'area.demPoints': ['Points MNT a telecharger', 'DEM points to download'],
+  'area.run': ['Chercher le meilleur emplacement', 'Find the best location'],
+  'area.running': ['Recherche...', 'Searching...'],
+  'area.tooHeavyTitle': ['Calcul trop lourd', 'Computation too heavy'],
+  'area.tooHeavyMsg': [
+    'Ce reglage demande {{n}} liaisons a evaluer, bien au-dela de ce qui reste interactif. ' +
+      'Augmentez les pas, ou reduisez la zone.',
+    'This setting requires {{n}} links to evaluate, far beyond what stays interactive. Increase the ' +
+      'spacings, or shrink the area.',
+  ],
+  'area.heavyWarn': [
+    '{{n}} liaisons a evaluer : le calcul prendra un moment.',
+    '{{n}} links to evaluate: the computation will take a while.',
+  ],
+  'area.resultsTitle': ['Meilleurs emplacements pour couvrir la zone', 'Best locations to cover the area'],
+  'area.resultsHint': [
+    'Part de la zone couverte depuis chaque emplacement, au seuil de marge retenu ({{db}} dB, ' +
+      'tenu sur 95 % des emplacements).',
+    'Share of the area covered from each location, at the retained margin threshold ({{db}} dB, ' +
+      'held on 95% of locations).',
+  ],
+  'area.col.rank': ['#', '#'],
+  'area.col.coords': ['Coordonnees', 'Coordinates'],
+  'area.col.elev': ['Alt.', 'Elev.'],
+  'area.col.covered': ['Zone couverte', 'Area covered'],
+  'area.col.areaKm2': ['Surface', 'Surface'],
+  'area.col.margin': ['Marge moyenne', 'Mean margin'],
+  'area.best': [
+    'Le meilleur emplacement couvre {{pct}} % de la zone, soit {{km}} km2.',
+    'The best location covers {{pct}}% of the area, i.e. {{km}} km2.',
+  ],
+  'area.stats': [
+    '{{candidates}} emplacements testes contre {{targets}} points de test, {{evaluated}} liaisons ' +
+      'evaluees en {{ms}} ms.',
+    '{{candidates}} locations tested against {{targets}} test points, {{evaluated}} links evaluated ' +
+      'in {{ms}} ms.',
+  ],
+  'area.showHeat': ['Carte de couverture', 'Coverage map'],
+  'area.footer': [
+    'Les emplacements candidats sont pris dans la zone : un sommet situe juste en dehors, qui la ' +
+      'couvrirait peut-etre mieux, n est pas teste - elargissez la zone pour l inclure. Chaque ' +
+      'liaison est evaluee sur le relief reel, avec la meme physique que le reste de l application.',
+    'Candidate locations are taken from within the area: a summit just outside it, which might cover ' +
+      'it better, is not tested - widen the area to include it. Every link is evaluated on real ' +
+      'terrain, with the same physics as the rest of the application.',
+  ],
+  'area.progress.dem': ['Relief de la zone - {{done}}/{{total}} requetes', 'Area terrain - {{done}}/{{total}} requests'],
+  'area.progress.scan': ['Recherche du meilleur emplacement', 'Searching for the best location'],
+  'area.error.noZone': ['Definissez d abord une zone sur la carte.', 'Define an area on the map first.'],
+  'area.error.tooBig': [
+    'Zone trop vaste pour ce pas de relief : augmentez le pas, ou reduisez la zone.',
+    'Area too large for this terrain step: increase the step, or shrink the area.',
+  ],
+  'area.tooltip.spot': [
+    'Emplacement #{{n}}<br>{{pct}} % de la zone ({{km}} km2)<br>alt. {{elev}} m',
+    'Location #{{n}}<br>{{pct}}% of the area ({{km}} km2)<br>elev. {{elev}} m',
+  ],
+  'area.tooltip.zone': ['Zone a couvrir', 'Area to cover'],
+
   // --- Classeur de calcul (.xlsx) -------------------------------------------
   'app.export.xlsx.label': ['Feuille de calcul', 'Spreadsheet'],
   'app.export.xlsx.hint': ['Tous les calculs, feuille par feuille', 'Every calculation, sheet by sheet'],
