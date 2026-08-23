@@ -949,6 +949,39 @@ const STRINGS = {
   'area.candidates': ['Emplacements testes', 'Locations tested'],
   'area.targets': ['Points de test', 'Test points'],
   'area.links': ['Liaisons a evaluer', 'Links to evaluate'],
+  'area.maxRange': ['Portee exploree', 'Explored range'],
+  'area.maxRangeHint': [
+    'Rayon explore autour de chaque emplacement. C est ce reglage qui gouverne le cout : au-dela de ' +
+      'l horizon radio ({{horizon}} km pour ces hauteurs d antenne) le bombement terrestre coupe ' +
+      'seul la liaison, et balayer plus loin ne fait que du travail perdu.',
+    'Radius explored around each location. This setting governs the cost: beyond the radio horizon ' +
+      '({{horizon}} km for these antenna heights) the earth bulge alone cuts the link, and sweeping ' +
+      'further is wasted work.',
+  ],
+  'area.bruteLinks': ['Force brute', 'Brute force'],
+  'area.bruteSamples': ['Force brute (echantillons)', 'Brute force (samples)'],
+  'area.sweeps': ['Balayages', 'Sweeps'],
+  'area.samples': ['Echantillons de relief', 'Terrain samples'],
+  'area.exactLinks': ['Liaisons exactes', 'Exact links'],
+  'area.speedup': ['Acceleration', 'Speed-up'],
+  'area.phase.coarse': ['Filtrage des emplacements', 'Screening locations'],
+  'area.phase.refine': ['Raffinement autour des meilleurs', 'Refining around the best'],
+  'area.phase.exact': ['Re-calcul exact des meilleurs', 'Exact recomputation of the best'],
+  'area.stats2': [
+    '{{candidates}} emplacements, {{targets}} points de test. {{sweeps}} balayages ' +
+      '({{samples}} echantillons) en {{msSweep}} ms, puis {{exactCandidates}} emplacements repasses ' +
+      'au moteur exact ({{exactLinks}} liaisons) en {{msExact}} ms. La force brute aurait demande ' +
+      '{{brute}} liaisons completes.',
+    '{{candidates}} locations, {{targets}} test points. {{sweeps}} sweeps ({{samples}} samples) in ' +
+      '{{msSweep}} ms, then {{exactCandidates}} locations put back through the exact engine ' +
+      '({{exactLinks}} links) in {{msExact}} ms. Brute force would have needed {{brute}} full links.',
+  ],
+  'area.exactNote': [
+    'Le classement ci-dessous vient du moteur exact - profil geodesique, diffraction de Deygout ' +
+      'multi-aretes - applique aux meilleurs emplacements retenus par le filtrage.',
+    'The ranking below comes from the exact engine - geodesic profile, multi-edge Deygout ' +
+      'diffraction - applied to the best locations retained by the screening pass.',
+  ],
   'area.demPoints': ['Points MNT a telecharger', 'DEM points to download'],
   'area.run': ['Chercher le meilleur emplacement', 'Find the best location'],
   'area.running': ['Recherche...', 'Searching...'],

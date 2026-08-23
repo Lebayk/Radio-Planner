@@ -424,11 +424,76 @@ couverte *supérieure* à celle de la zone, ce que la vérification a montré.
 reste : le MNT à télécharger se limite à la zone elle-même, sans la marge que
 réclame le calcul de portée. Une zone de 12 km² tient en 8 requêtes.
 
-Le coût est **quadratique** — emplacements testés × points de test — et
-affiché avant de lancer : diviser un pas par deux multiplie le travail par
-quatre. Au-delà de quatre millions de liaisons le bouton se bloque plutôt que
-de geler l'onglet. À titre d'ordre de grandeur, 3 080 liaisons sur une zone de
-12 km² s'évaluent en 24 ms dans le Web Worker.
+### Comment le calcul tient à grande échelle
+
+L'approche directe — une liaison complète par couple (emplacement, point de
+test) — est quadratique et relit le même relief des centaines de fois. Sur une
+zone de quelques kilomètres elle passe ; sur une région, non. Trois mécanismes
+la remplacent, et l'application choisit seule lequel appliquer.
+
+**1. La portée borne tout.** Le premier gain n'est pas algorithmique mais
+physique : au-delà de l'**horizon radio** le bombement terrestre coupe seul la
+liaison. Explorer plus loin est du travail perdu. La portée en espace libre ne
+borne rien en LoRa — elle dépasse le millier de kilomètres — alors que
+l'horizon d'un mât de 10 m vers un nœud à 2 m vaut 18,9 km. Le réglage est
+exposé dans l'interface, avec l'horizon affiché à côté : c'est lui qui
+gouverne le coût.
+
+**2. Balayage radial à horizon incrémental**
+([`sweep.js`](src/lib/sweep.js)). Au lieu de redescendre un profil par point de
+test, chaque emplacement est traité en un seul balayage : on avance le long de
+rayons en gardant l'**angle d'élévation maximal déjà rencontré**. Cet angle
+*est* l'horizon vu depuis l'antenne — un point est dégagé s'il s'élève
+au-dessus, masqué sinon, et l'écart donne directement la hauteur du
+diffracteur dominant. Chaque maille est visitée une fois, pour un travail
+constant. Le coût cesse de dépendre du nombre de points de test.
+
+**3. Sous-échantillonnage puis raffinement.** Le balayage tourne d'abord sur
+une fraction des emplacements, puis ne descend à pleine résolution qu'autour
+des meilleurs : un emplacement médiocre n'a pas à être connu au mètre près.
+
+**Le filtrage ne produit jamais le résultat.** Les meilleurs emplacements
+retenus repassent par le moteur complet — profil géodésique, diffraction de
+Deygout multi-arêtes, végétation traversée sous le faisceau réel. Les chiffres
+affichés viennent de là.
+
+| Zone | Mode | Emplacements | Force brute | Réel | Gain |
+|---|---|---|---|---|---|
+| 4 km | exhaustif | 72 | 295 k | 295 k | 1× |
+| 20 km | filtrage | 1 640 | 689 M | 74 M | 9× |
+| 60 km | filtrage | 14 400 | 53 G | 188 M | **282×** |
+| 200 km | filtrage | 158 000 | 6,4 T | 585 M | **10 933×** |
+| 700 km | filtrage | 463 400 | 55 T | 155 M | **354 742×** |
+
+*(échantillons de relief, seule unité commune aux deux approches — une
+« liaison » de la force brute n'est pas une opération, elle déroule tout un
+profil)*
+
+**En dessous de 3·10⁸ échantillons, le filtrage est désactivé** et le moteur
+exact tourne sur *tous* les emplacements. Le filtrage est une heuristique ;
+tant que l'exhaustif reste abordable, il n'y a aucune raison d'approximer.
+C'est une vérification qui l'a imposé : sur une zone de 12 km², le filtrage
+écartait un emplacement à égalité (92,9 %) avec les meilleurs. En mode
+exhaustif le classement est identique au calcul complet, en 23 ms.
+
+**Qualité du filtrage, mesurée** sur relief synthétique (8 × 8 km, deux crêtes
+croisées, 81 emplacements × 1 681 points de test) :
+
+- **0 % de faux négatifs** — le balayage ne manque jamais un point réellement
+  couvert. L'erreur est systématiquement dans le sens optimiste : une seule
+  arête de diffraction là où Deygout en cumule plusieurs. Pour un filtre c'est
+  le bon sens d'erreur, jamais celui qui écarte un bon emplacement ;
+- 38 % de faux positifs, qui tassent le classement sans en inverser la tête ;
+- le meilleur emplacement exact ressort **au rang 1** du filtrage ;
+- des 10 meilleurs emplacements exacts, une liste courte de 24 en retrouve 8,
+  de 32 en retrouve 9, **de 48 les retrouve tous** — d'où ce choix par défaut,
+  le re-calcul exact coûtant peu au regard du balayage.
+
+**Ce qui reste hors de portée, et pourquoi.** Le calcul n'est plus le mur : le
+**téléchargement du relief** l'est. Une zone de 220 × 220 km à 100 m
+représente 4,8 millions de points MNT, soit ~24 200 requêtes et près de deux
+heures contre une API gratuite. La grille reste donc plafonnée, et c'est elle
+qui limite la taille de zone praticable — pas la vitesse d'exécution.
 
 **Limite assumée** : les emplacements candidats sont pris *dans* la zone. Un
 sommet situé juste en dehors, qui la couvrirait peut-être mieux, n'est pas

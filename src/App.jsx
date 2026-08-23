@@ -11,7 +11,7 @@ import LinkSummary from './components/LinkSummary.jsx';
 import Disclaimer from './components/Disclaimer.jsx';
 import CoveragePanel from './components/CoveragePanel.jsx';
 import ChainPanel from './components/ChainPanel.jsx';
-import AreaPanel, { MAX_LINKS } from './components/AreaPanel.jsx';
+import AreaPanel from './components/AreaPanel.jsx';
 import AreaResults from './components/AreaResults.jsx';
 import { Section, Checkbox, Banner, Progress, Spinner, MarginChip, DropdownMenu } from './components/ui.jsx';
 
@@ -22,7 +22,7 @@ import { haversine, bearing } from './lib/geo.js';
 import { DEVICE_BY_ID, PRESET_BY_ID } from './lib/radio.js';
 import { analyzeSite, heightSweep, analyzeDirect, profileFromGrid, clutterProfiles, getHopProfiles, pinProfiles } from './lib/analysis.js';
 import { fetchClutter, estimateClutter, gridBbox, clutterSummary } from './lib/clutter.js';
-import { normalizeZone, zoneGrid, zonePointGrid, estimateArea, zoneMetrics } from './lib/area.js';
+import { normalizeZone, zoneGrid, zonePointGrid, planArea, zoneMetrics } from './lib/area.js';
 import { loadRoads, nearestRoad, bboxAround, clearRoadCache } from './lib/osm.js';
 import { exportGpx, exportKml, exportPdf, exportXlsx, preloadPdf } from './lib/exporters.js';
 import { renderCoverageMapPNG } from './lib/mapRender.js';
@@ -580,6 +580,36 @@ export default function App() {
     }
   }, [config.area.zone, config.area.gridStep, provider]);
 
+  /**
+   * Portee exploree autour de chaque emplacement, et horizon radio de
+   * reference.
+   *
+   * La portee en espace libre ne borne rien en LoRa : elle depasse le millier
+   * de kilometres. La borne utile est l horizon radio, au-dela duquel le
+   * bombement terrestre coupe seul la liaison. La valeur reste reglable, mais
+   * l horizon est affiche a cote pour que le choix soit informe.
+   */
+  const areaHorizonM = useMemo(
+    () => radioHorizonM(config.area.relayHeight, config.coverage.nodeHeight),
+    [config.area.relayHeight, config.coverage.nodeHeight]
+  );
+  const areaMaxRangeM = useMemo(
+    () =>
+      Math.min(
+        (config.area.maxRangeKm ?? 20) * 1000,
+        freeSpaceRangeM({
+          txPower: radio.relayPower,
+          gA: radio.relayGain,
+          gB: config.coverage.nodeGain,
+          cableLoss: radio.cableLoss,
+          sensitivity: PRESET_BY_ID[radio.preset].sens,
+          freqMHz: radio.freq,
+          margin: radio.desiredMargin,
+        })
+      ),
+    [config.area.maxRangeKm, radio, config.coverage.nodeGain]
+  );
+
   const runAreaSearch = useCallback(async () => {
     const zone = config.area.zone;
     if (!zone) {
@@ -590,8 +620,14 @@ export default function App() {
       setError(t('area.error.tooBig'));
       return;
     }
-    const est = estimateArea(zone, config.area.candidateStep, config.area.testStep);
-    if (est.links > MAX_LINKS) return;
+    const maxRangeM = areaMaxRangeM;
+    const plan = planArea(zone, {
+      candidateStep: config.area.candidateStep,
+      testStep: config.area.testStep,
+      gridStep: config.area.gridStep,
+      maxRangeM,
+    });
+    if (!plan || plan.tooBig) return;
 
     setError(null);
     setAreaBusy(true);
@@ -657,8 +693,9 @@ export default function App() {
       worker.onmessage = (ev) => {
         const m = ev.data;
         if (m.type === 'progress') {
+          const label = { coarse: 'area.phase.coarse', refine: 'area.phase.refine', exact: 'area.phase.exact' }[m.phase];
           setAreaProgress({ done: m.done, total: m.total });
-          setProgress({ label: t('area.progress.scan'), value: m.done, total: m.total });
+          setProgress({ label: t(label ?? 'area.progress.scan'), value: m.done, total: m.total });
         } else if (m.type === 'done') {
           setAreaResult({ top: m.top, scores: m.scores, cand: m.cand, stats: m.stats, zone });
           setAreaBusy(false);
@@ -687,8 +724,6 @@ export default function App() {
         setProgress(null);
       };
 
-      // Portee en espace libre au seuil retenu : au-dela, aucun relief ne
-      // rattrape le bilan, le worker peut sauter le point sans le derouler.
       const params = {
         freqMHz: radio.freq,
         cableLoss: radio.cableLoss,
@@ -700,20 +735,40 @@ export default function App() {
         gB: config.coverage.nodeGain,
         txPower: radio.relayPower,
       };
-      const maxRangeM = freeSpaceRangeM({ ...params, margin: radio.desiredMargin });
 
+      const metrics = zoneMetrics(zone);
       worker.postMessage({
         type: 'area',
         grid,
         dem,
         clutter,
-        candidates: cand.pts,
-        targets: targ.pts,
-        cand: { nx: cand.nx, ny: cand.ny, lat0: cand.lat0, lon0: cand.lon0, dLat: cand.dLat, dLon: cand.dLon },
+        // Les semis ne transitent plus point par point : le worker les
+        // reconstruit de leur descripteur, ce qui evite de serialiser des
+        // millions d objets pour rien.
+        cand: {
+          nx: cand.nx,
+          ny: cand.ny,
+          lat0: cand.lat0,
+          lon0: cand.lon0,
+          dLat: cand.dLat,
+          dLon: cand.dLon,
+          diagM: Math.hypot(metrics.widthM, metrics.heightM),
+        },
+        targ: {
+          nx: targ.nx,
+          ny: targ.ny,
+          lat0: targ.lat0,
+          lon0: targ.lon0,
+          dLat: targ.dLat,
+          dLon: targ.dLon,
+          stepM: targ.stepM,
+        },
+        zone,
         params,
+        plan,
         threshold: radio.desiredMargin,
         maxRangeM,
-        zoneAreaKm2: zoneMetrics(zone).areaKm2,
+        zoneAreaKm2: metrics.areaKm2,
       });
     } catch (e) {
       if (e.name !== 'AbortError') setError(e.message);
@@ -721,7 +776,7 @@ export default function App() {
       setAreaProgress(null);
       setProgress(null);
     }
-  }, [config.area, config.coverage, areaDemEstimate, provider, radio, search.clutter, search.buildings, t]);
+  }, [config.area, config.coverage, areaDemEstimate, areaMaxRangeM, provider, radio, search.clutter, search.buildings, t]);
 
   useEffect(() => () => areaWorkerRef.current?.terminate(), []);
 
@@ -1100,6 +1155,8 @@ export default function App() {
           busy={areaBusy}
           progress={areaProgress}
           demEstimate={areaDemEstimate}
+          maxRangeM={areaMaxRangeM}
+          horizonM={areaHorizonM}
           disabled={busy}
         />
       </Section>

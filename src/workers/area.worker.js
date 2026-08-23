@@ -1,21 +1,31 @@
-// Balayage des emplacements candidats pour couvrir une zone.
+// Recherche du meilleur emplacement de relais pour couvrir une zone.
 //
-// Pour chaque emplacement possible du relais, on evalue la liaison vers chaque
-// point de test de la zone et l on compte ceux qui passent. Le meilleur
-// emplacement est celui qui en couvre le plus.
+// Le balayage naif - une liaison complete par couple (emplacement, point de
+// test) - releve le meme relief des centaines de fois et coute
+// O(emplacements x points x longueur de profil). Il ne tient pas au-dela de
+// quelques millions de couples.
 //
-// C est volontairement un comptage direct, et non l aire du polygone de portee
-// utilise ailleurs : la question posee porte sur la surface **de la zone**
-// couverte, pas sur la portee dans toutes les directions. Compter des points
-// de test y repond exactement, et traite sans cas particulier les poches
-// couvertes au-dela d un versant, qu un polygone etoile ne sait pas
-// representer.
+// Trois etages le remplacent :
 //
-// Aucun acces reseau : le MNT arrive entierement du thread principal.
+//   1. FILTRAGE. Chaque emplacement est traite par un balayage radial a
+//      horizon incrementiel (`sweep.js`) : chaque maille visitee une fois, en
+//      travail constant. Le cout cesse de dependre du nombre de points de test.
+//   2. RAFFINEMENT. Le filtrage tourne d abord sur un sous-echantillon des
+//      emplacements, puis ne descend a pleine resolution qu autour des
+//      meilleurs. Un emplacement mediocre n a pas a etre connu au metre pres.
+//   3. RE-CALCUL EXACT. Les meilleurs retenus repassent par le moteur complet
+//      - profil geodesique, diffraction de Deygout multi-aretes, vegetation
+//      traversee sous le faisceau reel. Les chiffres publies viennent de la,
+//      jamais du filtre.
+//
+// Le filtre peut donc approximer sans consequence : il choisit qui merite un
+// calcul exact, il ne produit pas le resultat.
 
 import { analyzeHop } from '../lib/radio.js';
 import { sampleGrid, profileSampleCount } from '../lib/dem.js';
 import { haversine } from '../lib/geo.js';
+import { sweepCandidate } from '../lib/sweep.js';
+import { planArea, REFINE_SEEDS, EXACT_TOP_K } from '../lib/area.js';
 
 self.onmessage = (ev) => {
   const msg = ev.data;
@@ -23,16 +33,147 @@ self.onmessage = (ev) => {
 
   try {
     const t0 = performance.now();
-    const { grid, dem, clutter, candidates, targets, cand, params, threshold, maxRangeM, zoneAreaKm2 } = msg;
+    const {
+      grid,
+      dem,
+      clutter,
+      cand,
+      targ,
+      params,
+      threshold,
+      maxRangeM,
+      zoneAreaKm2,
+      zone,
+      plan,
+      exactTopK = EXACT_TOP_K,
+    } = msg;
 
-    // Altitude des points de test : constante d un candidat a l autre, donc
-    // echantillonnee une fois pour toutes plutot qu a chaque bond.
-    const nT = targets.length;
+    const nC = cand.nx * cand.ny;
+    const nT = targ.nx * targ.ny;
+    const foliageData = clutter?.foliage ?? null;
+    const buildingData = clutter?.buildings ?? null;
+
+    const latOf = (g, iy) => g.lat0 + iy * g.dLat;
+    const lonOf = (g, ix) => g.lon0 + ix * g.dLon;
+
+    // --- Etage 1 et 2 : filtrage par balayage --------------------------------
+    const scores = new Float32Array(nC).fill(NaN);
+    const stamp = new Int32Array(nT).fill(-1); // estampilles : evite de vider un masque par candidat
+    // Le plan vient du meme calcul que celui affiche dans le panneau : le pas
+    // d echantillonnage effectivement applique est bien celui annonce.
+    const rayStepM = plan.rayStepM;
+    const sweepRange = Math.min(maxRangeM, cand.diagM ?? maxRangeM);
+    const nAz = plan.nAz;
+    let sweeps = 0;
+
+    const runSweep = (ix, iy) => {
+      const idx = iy * cand.nx + ix;
+      if (!Number.isNaN(scores[idx])) return scores[idx];
+      const origin = { lat: latOf(cand, iy), lon: lonOf(cand, ix) };
+      const elev = sampleGrid(grid, dem, origin.lat, origin.lon);
+      if (!Number.isFinite(elev)) {
+        scores[idx] = -1;
+        return -1;
+      }
+      const covered = sweepCandidate({
+        grid,
+        dem,
+        foliageData,
+        buildingData,
+        origin,
+        originElev: elev,
+        target: targ,
+        stamp,
+        mark: idx,
+        zone,
+        params,
+        threshold,
+        nAz,
+        rayStepM,
+        maxRangeM: sweepRange,
+      });
+      sweeps++;
+      scores[idx] = covered;
+      return covered;
+    };
+
+    const stride = plan.stride;
+    const coarse = [];
+    let done = 0;
+    // Mode exhaustif : le moteur exact est abordable sur tous les emplacements,
+    // on ne filtre pas. Le filtrage etant une heuristique, l eviter quand on
+    // peut s en passer supprime le risque d ecarter un emplacement a egalite
+    // avec les meilleurs.
+    const totalCoarse = plan.exhaustive
+      ? 0
+      : Math.ceil(cand.ny / stride) * Math.ceil(cand.nx / stride);
+    if (!plan.exhaustive) {
+      for (let iy = 0; iy < cand.ny; iy += stride) {
+        for (let ix = 0; ix < cand.nx; ix += stride) {
+          coarse.push({ ix, iy, v: runSweep(ix, iy) });
+          if (++done % 256 === 0) {
+            self.postMessage({ type: 'progress', phase: 'coarse', done, total: totalCoarse });
+          }
+        }
+      }
+    }
+    const tCoarse = performance.now();
+
+    // Raffinement : pleine resolution autour des meilleurs blocs seulement.
+    let refined = 0;
+    if (!plan.exhaustive && stride > 1) {
+      coarse.sort((a, b) => b.v - a.v);
+      const seeds = coarse.slice(0, REFINE_SEEDS);
+      for (const s of seeds) {
+        for (let iy = Math.max(0, s.iy - stride); iy <= Math.min(cand.ny - 1, s.iy + stride); iy++) {
+          for (let ix = Math.max(0, s.ix - stride); ix <= Math.min(cand.nx - 1, s.ix + stride); ix++) {
+            if (Number.isNaN(scores[iy * cand.nx + ix])) {
+              runSweep(ix, iy);
+              refined++;
+            }
+          }
+        }
+        self.postMessage({ type: 'progress', phase: 'refine', done: refined, total: seeds.length * (2 * stride + 1) ** 2 });
+      }
+    }
+    const tRefine = performance.now();
+
+    // Carte de chaleur : les mailles non evaluees reprennent la valeur de leur
+    // bloc, sans quoi l image serait criblee de trous.
+    if (!plan.exhaustive && stride > 1) {
+      for (let iy = 0; iy < cand.ny; iy++) {
+        for (let ix = 0; ix < cand.nx; ix++) {
+          const idx = iy * cand.nx + ix;
+          if (Number.isNaN(scores[idx])) {
+            const by = Math.min(cand.ny - 1, Math.round(iy / stride) * stride);
+            const bx = Math.min(cand.nx - 1, Math.round(ix / stride) * stride);
+            const v = scores[by * cand.nx + bx];
+            if (!Number.isNaN(v)) scores[idx] = v;
+          }
+        }
+      }
+    }
+
+    // --- Etage 3 : moteur exact ----------------------------------------------
+    let shortlist;
+    if (plan.exhaustive) {
+      shortlist = Array.from({ length: nC }, (_, i) => i);
+    } else {
+      const ranked = [];
+      for (let i = 0; i < nC; i++) if (!Number.isNaN(scores[i]) && scores[i] >= 0) ranked.push(i);
+      ranked.sort((a, b) => scores[b] - scores[a]);
+      shortlist = ranked.slice(0, exactTopK);
+    }
+
+    const targets = new Array(nT);
+    for (let iy = 0; iy < targ.ny; iy++) {
+      for (let ix = 0; ix < targ.nx; ix++) {
+        targets[iy * targ.nx + ix] = { lat: latOf(targ, iy), lon: lonOf(targ, ix) };
+      }
+    }
     const tElev = new Float64Array(nT);
     for (let i = 0; i < nT; i++) tElev[i] = sampleGrid(grid, dem, targets[i].lat, targets[i].lon);
 
-    // Tampons de profil reutilises, indexes par longueur : les allouer a
-    // chaque bond dominerait le temps de calcul.
     const bufs = new Map();
     const bufFor = (n) => {
       let b = bufs.get(n);
@@ -47,121 +188,120 @@ self.onmessage = (ev) => {
       return b;
     };
 
-    // La surface couverte se deduit de la fraction de points atteints et de la
-    // surface reelle de la zone, et non d un comptage de mailles : le semis
-    // regulier ne pave pas exactement le rectangle (huit points espaces de
-    // 500 m couvrent 4,0 km, pas 3,88), et compter les mailles annoncerait
-    // une surface couverte superieure a celle de la zone.
-    const results = [];
-    const scores = new Float32Array(candidates.length).fill(NaN);
-    let evaluated = 0;
-    let skippedRange = 0;
-    const tick = Math.max(1, Math.floor(candidates.length / 100));
-
-    for (let ci = 0; ci < candidates.length; ci++) {
-      if (ci % tick === 0) self.postMessage({ type: 'progress', done: ci, total: candidates.length });
-
-      const c = candidates[ci];
-      const cElev = sampleGrid(grid, dem, c.lat, c.lon);
-      if (!Number.isFinite(cElev)) continue;
-
+    /** Couverture exacte, moteur complet, pour un emplacement retenu. */
+    const exactCoverage = (origin, originElev) => {
       let covered = 0;
       let reachable = 0;
       let marginSum = 0;
-
+      let links = 0;
       for (let ti = 0; ti < nT; ti++) {
         const t = targets[ti];
         const tE = tElev[ti];
         if (!Number.isFinite(tE)) continue;
         reachable++;
-
-        const d = haversine(c, t);
-        // Le point de test qui porte le relais est couvert par construction.
+        const d = haversine(origin, t);
         if (d < grid.step) {
           covered++;
           continue;
         }
-        // Au-dela de la portee en espace libre, aucun relief ne peut aider :
-        // inutile de derouler le profil.
-        if (d > maxRangeM) {
-          skippedRange++;
-          continue;
-        }
+        if (d > maxRangeM) continue;
 
         const n = profileSampleCount(d, grid.step);
         const b = bufFor(n);
         const prof = b.prof;
-        for (let i = 0; i < n; i++) {
-          const f = i / (n - 1);
-          const lat = c.lat + (t.lat - c.lat) * f;
-          const lon = c.lon + (t.lon - c.lon) * f;
-          prof[i] = sampleGrid(grid, dem, lat, lon);
-          if (clutter) {
-            const v = sampleGrid(grid, clutter.foliage, lat, lon);
-            const h = sampleGrid(grid, clutter.buildings, lat, lon);
-            b.foliage[i] = Number.isFinite(v) ? v : 0;
-            b.buildingHeight[i] = Number.isFinite(h) ? h : 0;
-          }
-        }
-        // Les extremites viennent d un echantillonnage ponctuel, plus sur que
-        // l interpolation le long du trajet.
-        prof[0] = cElev;
-        prof[n - 1] = tE;
-
         let ok = true;
         for (let i = 0; i < n; i++) {
-          if (!Number.isFinite(prof[i])) {
+          const f = i / (n - 1);
+          const lat = origin.lat + (t.lat - origin.lat) * f;
+          const lon = origin.lon + (t.lon - origin.lon) * f;
+          const v = sampleGrid(grid, dem, lat, lon);
+          if (!Number.isFinite(v)) {
             ok = false;
             break;
           }
+          prof[i] = v;
+          if (clutter) {
+            const fv = sampleGrid(grid, foliageData, lat, lon);
+            const bv = sampleGrid(grid, buildingData, lat, lon);
+            b.foliage[i] = Number.isFinite(fv) ? fv : 0;
+            b.buildingHeight[i] = Number.isFinite(bv) ? bv : 0;
+          }
         }
         if (!ok) continue;
+        prof[0] = originElev;
+        prof[n - 1] = tE;
 
         const hop = analyzeHop(prof, d, {
           ...params,
           foliage: b.foliage ?? undefined,
           buildingHeight: b.buildingHeight ?? undefined,
         });
-        evaluated++;
-        // Le verdict de l application se prononce sur la marge tenue sur 95 %
-        // des emplacements : on retient le meme critere ici, sinon le
-        // classement promettrait une couverture que le reste de l application
-        // jugerait fragile.
+        links++;
         if (hop.margin95 >= threshold) {
           covered++;
           marginSum += hop.margin95;
         }
       }
+      return { covered, reachable, marginSum, links };
+    };
 
-      const fraction = reachable ? covered / reachable : 0;
-      scores[ci] = fraction;
+    const results = [];
+    let exactLinks = 0;
+    shortlist.forEach((idx, i) => {
+      const ix = idx % cand.nx;
+      const iy = (idx - ix) / cand.nx;
+      const origin = { lat: latOf(cand, iy), lon: lonOf(cand, ix) };
+      const elev = sampleGrid(grid, dem, origin.lat, origin.lon);
+      if (!Number.isFinite(elev)) return;
+      const e = exactCoverage(origin, elev);
+      exactLinks += e.links;
+      const fraction = e.reachable ? e.covered / e.reachable : 0;
+      // En mode exhaustif la carte de chaleur montre la couverture exacte,
+      // et non un score de filtrage.
+      if (plan.exhaustive) scores[idx] = e.covered;
       results.push({
-        lat: c.lat,
-        lon: c.lon,
-        elev: cElev,
-        covered,
-        reachable,
+        lat: origin.lat,
+        lon: origin.lon,
+        elev,
+        covered: e.covered,
+        reachable: e.reachable,
         fraction,
         areaKm2: fraction * zoneAreaKm2,
-        meanMargin: covered ? marginSum / covered : NaN,
+        meanMargin: e.covered ? e.marginSum / e.covered : NaN,
+        screened: scores[idx],
       });
-    }
+      if (i % 32 === 0) self.postMessage({ type: 'progress', phase: 'exact', done: i, total: shortlist.length });
+    });
 
     results.sort((a, b) => b.covered - a.covered || b.meanMargin - a.meanMargin);
+    results.length = Math.min(results.length, 60);
+    const tEnd = performance.now();
+
+    // Ce que la force brute aurait coute, pour situer le gain.
+    const bruteLinks = nC * nT;
 
     self.postMessage(
       {
         type: 'done',
-        top: results.slice(0, 60),
+        top: results,
         scores,
-        cand,
+        cand: { nx: cand.nx, ny: cand.ny, lat0: cand.lat0, lon0: cand.lon0, dLat: cand.dLat, dLon: cand.dLon },
         stats: {
-          candidates: candidates.length,
+          exhaustive: !!plan.exhaustive,
+          candidates: nC,
           targets: nT,
-          evaluated,
-          skippedRange,
+          sweeps,
+          refined,
+          stride,
+          nAz,
+          exactCandidates: results.length,
+          exactLinks,
+          bruteLinks,
+          msCoarse: Math.round(tCoarse - t0),
+          msRefine: Math.round(tRefine - tCoarse),
+          msExact: Math.round(tEnd - tRefine),
+          ms: Math.round(tEnd - t0),
           best: results[0] ?? null,
-          ms: Math.round(performance.now() - t0),
         },
       },
       [scores.buffer]

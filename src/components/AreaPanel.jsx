@@ -1,11 +1,10 @@
 import React from 'react';
 import { Field, NumberInput, Banner, Spinner } from './ui.jsx';
 import { useI18n } from '../lib/i18n.js';
-import { zoneMetrics, estimateArea } from '../lib/area.js';
+import { zoneMetrics, planArea } from '../lib/area.js';
 
-/** Au-dela, le balayage quadratique cesse d etre interactif. */
-export const MAX_LINKS = 4_000_000;
-const WARN_LINKS = 600_000;
+/** Au-dela, un balayage cesse d etre interactif. */
+const WARN_SAMPLES = 6e7;
 
 /**
  * Recherche du meilleur emplacement de relais pour couvrir une zone.
@@ -24,16 +23,26 @@ export default function AreaPanel({
   busy,
   progress,
   demEstimate,
+  maxRangeM,
+  horizonM,
   disabled,
 }) {
   const { t, locale } = useI18n();
   const set = (patch) => onChange({ ...area, ...patch });
   const zone = area.zone;
   const m = zoneMetrics(zone);
-  const est = estimateArea(zone, area.candidateStep, area.testStep);
-  const tooHeavy = est.links > MAX_LINKS;
-  const heavy = !tooHeavy && est.links > WARN_LINKS;
-  const nf = (v) => v.toLocaleString(locale);
+  const plan = planArea(zone, {
+    candidateStep: area.candidateStep,
+    testStep: area.testStep,
+    gridStep: area.gridStep,
+    maxRangeM,
+  });
+  const tooHeavy = plan?.tooBig ?? false;
+  const heavy = !tooHeavy && (plan?.totalSamples ?? 0) > WARN_SAMPLES;
+  const nf = (v) => Math.round(v).toLocaleString(locale);
+  /** Grands nombres en notation compacte : « 24 000 milliards » reste lisible. */
+  const big = (v) =>
+    v >= 1e12 ? `${(v / 1e12).toFixed(1)}e12` : v >= 1e9 ? `${(v / 1e9).toFixed(1)}e9` : nf(v);
 
   return (
     <div className="space-y-3">
@@ -74,9 +83,24 @@ export default function AreaPanel({
         </div>
       </div>
 
-      <Field label={t('area.relayHeight')}>
-        <NumberInput value={area.relayHeight} onChange={(v) => set({ relayHeight: v })} min={0} max={120} suffix="m" />
-      </Field>
+      <div className="grid grid-cols-2 gap-2">
+        <Field label={t('area.relayHeight')}>
+          <NumberInput value={area.relayHeight} onChange={(v) => set({ relayHeight: v })} min={0} max={120} suffix="m" />
+        </Field>
+        <Field label={t('area.maxRange')}>
+          <NumberInput
+            value={area.maxRangeKm ?? 20}
+            onChange={(v) => set({ maxRangeKm: v })}
+            min={1}
+            max={200}
+            step="1"
+            suffix="km"
+          />
+        </Field>
+      </div>
+      <p className="-mt-1 text-[11px] leading-snug text-zinc-600">
+        {t('area.maxRangeHint', { horizon: horizonM ? (horizonM / 1000).toFixed(1) : '-' })}
+      </p>
 
       <div className="grid grid-cols-2 gap-2">
         <Field label={t('area.candidateStep')}>
@@ -106,23 +130,49 @@ export default function AreaPanel({
         <NumberInput value={area.gridStep} onChange={(v) => set({ gridStep: v })} min={20} max={500} step="10" suffix="m" />
       </Field>
 
-      {zone && (
+      {zone && plan && (
         <div className="rounded-lg border border-ink-500/70 bg-ink-900/50 px-2.5 py-2 text-[11px] leading-relaxed">
           <div className="flex items-center justify-between">
             <span className="text-zinc-500">{t('area.candidates')}</span>
-            <span className="font-mono text-zinc-300">{nf(est.candidates)}</span>
+            <span className="font-mono text-zinc-300">{nf(plan.candidates)}</span>
           </div>
           <div className="flex items-center justify-between">
             <span className="text-zinc-500">{t('area.targets')}</span>
-            <span className="font-mono text-zinc-300">{nf(est.targets)}</span>
+            <span className="font-mono text-zinc-300">{nf(plan.targets)}</span>
+          </div>
+          {/* Ce que la force brute aurait coute, en regard du travail reel :
+              c est le rapport entre ces deux lignes qui dit ce que l algorithme
+              fait gagner. */}
+          <div className="mt-1 flex items-center justify-between border-t border-ink-500/50 pt-1">
+            <span className="text-zinc-500">{t('area.bruteSamples')}</span>
+            <span className="font-mono text-zinc-500 line-through">{big(plan.bruteSamples)}</span>
           </div>
           <div className="flex items-center justify-between">
-            <span className="text-zinc-500">{t('area.links')}</span>
-            <span className={`font-mono ${tooHeavy ? 'text-rose-300' : heavy ? 'text-amber-300' : 'text-zinc-300'}`}>
-              {nf(est.links)}
+            <span className="text-zinc-500">{t('area.sweeps')}</span>
+            <span className="font-mono text-zinc-300">
+              {nf(plan.sweeps)}
+              {plan.stride > 1 ? ` (1/${plan.stride ** 2})` : ''}
             </span>
           </div>
           <div className="flex items-center justify-between">
+            <span className="text-zinc-500">{t('area.samples')}</span>
+            <span className={`font-mono ${heavy ? 'text-amber-300' : 'text-zinc-300'}`}>{big(plan.totalSamples)}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className="text-zinc-500">{t('area.exactLinks')}</span>
+            <span className="font-mono text-zinc-300">{big(plan.exactLinks)}</span>
+          </div>
+          <div className="flex items-center justify-between">
+            <span className={plan.speedup >= 2 ? 'text-emerald-400/80' : 'text-zinc-500'}>{t('area.speedup')}</span>
+            <span className={`font-mono font-semibold ${plan.speedup >= 2 ? 'text-emerald-300' : 'text-zinc-400'}`}>
+              {plan.speedup >= 1000
+                ? `${big(plan.speedup)}x`
+                : plan.speedup >= 10
+                  ? `${Math.round(plan.speedup)}x`
+                  : `${plan.speedup.toFixed(1)}x`}
+            </span>
+          </div>
+          <div className="mt-1 flex items-center justify-between border-t border-ink-500/50 pt-1">
             <span className="text-zinc-500">{t('area.demPoints')}</span>
             <span className="font-mono text-zinc-300">
               {demEstimate?.points != null ? nf(demEstimate.points) : '-'}
@@ -132,8 +182,8 @@ export default function AreaPanel({
         </div>
       )}
 
-      {tooHeavy && <Banner tone="error" title={t('area.tooHeavyTitle')}>{t('area.tooHeavyMsg', { n: nf(est.links) })}</Banner>}
-      {heavy && <Banner tone="warn">{t('area.heavyWarn', { n: nf(est.links) })}</Banner>}
+      {tooHeavy && <Banner tone="error" title={t('area.tooHeavyTitle')}>{t('area.tooHeavyMsg', { n: big(plan.candidates) })}</Banner>}
+      {heavy && <Banner tone="warn">{t('area.heavyWarn', { n: big(plan.totalSamples) })}</Banner>}
 
       <button
         type="button"

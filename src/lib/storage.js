@@ -48,6 +48,11 @@ export const DEFAULT_CONFIG = {
     candidateStep: 400,
     testStep: 400,
     gridStep: 100,
+    // Portee exploree autour de chaque emplacement. C est le reglage qui
+    // gouverne le cout du calcul : au-dela de l horizon radio le bombement
+    // terrestre coupe seul la liaison, et balayer plus loin est du travail
+    // perdu. Valeur par defaut voisine de l horizon d un mat de 10 m.
+    maxRangeKm: 20,
   },
   provider: 'ign',
   ui: { heatmap: true, candidates: true, coverage: true, chain: true },

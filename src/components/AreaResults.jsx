@@ -7,6 +7,9 @@ const pct = (f) => `${(f * 100).toFixed(1)} %`;
 export default function AreaResults({ result, desiredMargin, onLocate }) {
   const { t, locale } = useI18n();
   const [expanded, setExpanded] = useState(false);
+  const nf = (v) => Math.round(v ?? 0).toLocaleString(locale);
+  const big = (v) =>
+    v >= 1e12 ? `${(v / 1e12).toFixed(1)}e12` : v >= 1e9 ? `${(v / 1e9).toFixed(1)}e9` : nf(v);
   if (!result?.top?.length) return null;
 
   const rows = expanded ? result.top.slice(0, 30) : result.top.slice(0, 8);
@@ -23,7 +26,7 @@ export default function AreaResults({ result, desiredMargin, onLocate }) {
       )}
 
       <p className="text-[11px] leading-relaxed text-zinc-500">
-        {t('area.resultsHint', { db: desiredMargin })}
+        {t('area.resultsHint', { db: desiredMargin })} {t('area.exactNote')}
       </p>
 
       <div className="-mx-1 overflow-x-auto">
@@ -95,11 +98,16 @@ export default function AreaResults({ result, desiredMargin, onLocate }) {
 
       {result.stats && (
         <p className="text-[11px] leading-relaxed text-zinc-600">
-          {t('area.stats', {
-            candidates: result.stats.candidates.toLocaleString(locale),
-            targets: result.stats.targets.toLocaleString(locale),
-            evaluated: result.stats.evaluated.toLocaleString(locale),
-            ms: result.stats.ms.toLocaleString(locale),
+          {t('area.stats2', {
+            candidates: nf(result.stats.candidates),
+            targets: nf(result.stats.targets),
+            sweeps: nf(result.stats.sweeps),
+            samples: big(result.stats.sweeps * (result.stats.nAz || 0)),
+            msSweep: nf(result.stats.msCoarse + result.stats.msRefine),
+            exactCandidates: nf(result.stats.exactCandidates),
+            exactLinks: big(result.stats.exactLinks),
+            msExact: nf(result.stats.msExact),
+            brute: big(result.stats.bruteLinks),
           })}
         </p>
       )}
